@@ -18,6 +18,7 @@ pub(crate) struct ClaudeSession {
     pub title: String,
     pub cwd: String,
     pub context: String,
+    pub worktree_path: Option<String>,
     pub updated_at_ms: u64,
 }
 
@@ -33,6 +34,7 @@ struct TranscriptState {
     agent_name: Option<String>,
     first_prompt: Option<String>,
     tool_worktree: Option<String>,
+    tool_worktree_path: Option<String>,
 }
 
 impl TranscriptState {
@@ -72,6 +74,9 @@ impl TranscriptState {
             Some("assistant") => {
                 if let Some(worktree) = last_tool_worktree(&value) {
                     self.tool_worktree = Some(worktree);
+                }
+                if let Some(path) = last_tool_value(&value, crate::right_panel::worktree_path) {
+                    self.tool_worktree_path = Some(path);
                 }
             }
             _ => {}
@@ -229,11 +234,14 @@ fn session_from_state(
         .or(state.agent_name.as_deref())
         .unwrap_or_default();
     let context = session_context(&cwd, state.tool_worktree.as_deref(), named_title);
+    let worktree_path =
+        crate::right_panel::worktree_path(&cwd).or_else(|| state.tool_worktree_path.clone());
     Some(ClaudeSession {
         session_id,
         title,
         cwd,
         context,
+        worktree_path,
         updated_at_ms: modified
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
@@ -267,6 +275,10 @@ fn worktree_name(text: &str) -> Option<String> {
 }
 
 fn last_tool_worktree(value: &Value) -> Option<String> {
+    last_tool_value(value, worktree_name)
+}
+
+fn last_tool_value(value: &Value, extract: fn(&str) -> Option<String>) -> Option<String> {
     let blocks = value.get("message")?.get("content")?.as_array()?;
     blocks
         .iter()
@@ -277,7 +289,7 @@ fn last_tool_worktree(value: &Value) -> Option<String> {
                 .into_iter()
                 .filter_map(|key| input.get(key).and_then(Value::as_str))
         })
-        .filter_map(worktree_name)
+        .filter_map(extract)
         .next_back()
 }
 
@@ -567,6 +579,19 @@ mod tests {
         assert_eq!(
             contexts,
             ["VK25-2727-api", "VK25-2904", "VK25-2806", "projects"]
+        );
+        let worktree_paths = sessions
+            .iter()
+            .map(|session| session.worktree_path.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            worktree_paths,
+            [
+                Some("/r/vakinha-api-worktrees/VK25-2727-api"),
+                Some("/r/web-worktrees/VK25-2904"),
+                None,
+                None
+            ]
         );
     }
 

@@ -2445,6 +2445,34 @@ impl HeadlessServer {
                     client.pixel_mouse && client.host_sgr_pixels_active == Some(true)
                 });
                 let mut events = events;
+                if crate::right_panel::parse_public_id(&pane_id).is_some() {
+                    let Some(runtime) = self.app.right_panel_runtime(&pane_id) else {
+                        return false;
+                    };
+                    super::pane_input::downgrade_ineligible_pixel_mouse(
+                        &mut events,
+                        pixel_mouse,
+                        runtime.current_size(),
+                        runtime.pixel_size(),
+                    );
+                    let interaction = client_pane_input_has_interaction(&events);
+                    if let Some(client) = self.clients.get_mut(&client_id) {
+                        client.track_shell_input(
+                            ClientShellInputTarget::Pane(pane_id.clone()),
+                            &events,
+                        );
+                    }
+                    let foreground_changed =
+                        interaction && self.promote_client_to_foreground(client_id);
+                    let Some(runtime) = self.app.right_panel_runtime(&pane_id) else {
+                        return foreground_changed;
+                    };
+                    let scroll_before = runtime.scroll_metrics();
+                    if let Err(err) = apply_client_popup_input_events(runtime, &events) {
+                        warn!(client_id, pane_id, err = %err, "right panel input failed");
+                    }
+                    return foreground_changed || runtime.scroll_metrics() != scroll_before;
+                }
                 let Some((workspace_index, runtime_pane_id)) = self.app.parse_pane_id(&pane_id)
                 else {
                     return false;

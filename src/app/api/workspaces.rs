@@ -88,6 +88,7 @@ impl App {
         let Some(index) = self.parse_workspace_id(&target.workspace_id) else {
             return workspace_not_found(id, &target.workspace_id);
         };
+        self.blur_right_panel();
         if self.state.workspaces.get(index).is_none() {
             return workspace_not_found(id, &target.workspace_id);
         }

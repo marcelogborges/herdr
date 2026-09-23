@@ -3957,6 +3957,24 @@
           ],
           "type": "object"
         },
+        "RightPanelMode": {
+          "enum": [
+            "files",
+            "diff"
+          ],
+          "type": "string"
+        },
+        "RightPanelShowParams": {
+          "properties": {
+            "mode": {
+              "$ref": "#/schemas/request/$defs/RightPanelMode"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
         "ServerLiveHandoffParams": {
           "properties": {
             "expected_protocol": {
@@ -5350,6 +5368,38 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/ClaudeSessionOpenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.toggle",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.show",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelShowParams"
             }
           },
           "required": [

@@ -482,6 +482,15 @@ impl App {
     }
 
     pub(super) fn handle_pane_focus(&mut self, id: String, target: PaneTarget) -> String {
+        if let Some(terminal_id) = crate::right_panel::parse_public_id(&target.pane_id) {
+            return if self.focus_right_panel(terminal_id) {
+                self.state.mode = crate::app::Mode::Terminal;
+                encode_success(id, ResponseResult::Ok {})
+            } else {
+                pane_not_found(id, &target.pane_id)
+            };
+        }
+        self.blur_right_panel();
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
             return pane_not_found(id, &target.pane_id);
         };

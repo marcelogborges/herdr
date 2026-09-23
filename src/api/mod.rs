@@ -63,6 +63,8 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::PaneClear(_)
             | Method::PaneEditScrollback(_)
             | Method::PaneFocus(_)
+            | Method::RightPanelToggle(_)
+            | Method::RightPanelShow(_)
             | Method::PaneInputSet(_)
             | Method::PaneRename(_)
             | Method::PaneGraphicsSet(_)

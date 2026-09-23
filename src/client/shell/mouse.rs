@@ -2147,6 +2147,9 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
+                if self.handle_right_panel_header_click(point, outcome) {
+                    return;
+                }
                 let scrollbar_hit = self
                     .hits
                     .panes
@@ -2321,6 +2324,36 @@ impl ClientShellState {
             }
             _ => {}
         }
+    }
+
+    fn handle_right_panel_header_click(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(panel) = self
+            .hits
+            .panes
+            .iter()
+            .find(|hit| crate::right_panel::parse_public_id(&hit.pane_id).is_some())
+            .map(|hit| hit.rect)
+        else {
+            return false;
+        };
+        let Some((mode, _)) = crate::right_panel::header_tabs(panel)
+            .into_iter()
+            .find(|(_, rect)| super::contains(*rect, point))
+        else {
+            return false;
+        };
+        self.mode = ClientShellMode::Terminal;
+        self.push_endpoint_method(
+            crate::api::schema::Method::RightPanelShow(crate::api::schema::RightPanelShowParams {
+                mode,
+            }),
+            outcome,
+        );
+        true
     }
 
     fn pane_mouse_position(&self, hit: &PaneHit, mouse: MouseEvent) -> ClientMousePosition {

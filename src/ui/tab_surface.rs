@@ -57,6 +57,7 @@ pub(crate) fn compute_tab_surface_for(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> TabSurfaceLayout {
+    let area = app.right_panel.tab_area(area);
     let tab = target.and_then(|target| {
         app.workspaces
             .get(target.workspace_index)?
@@ -99,6 +100,7 @@ pub(crate) fn resize_tab_surface(
     area: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    let area = app.right_panel.tab_area(area);
     let Some(tab) = app
         .workspaces
         .get(workspace_index)

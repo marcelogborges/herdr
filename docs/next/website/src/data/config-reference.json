@@ -836,6 +836,12 @@
           "description": "Toggle sidebar collapse."
         },
         {
+          "key": "keys.toggle_right_panel",
+          "type": "keybinding",
+          "default": "\"prefix+i\"",
+          "description": "Toggle the right files/diff panel."
+        },
+        {
           "key": "keys.indexed.tabs",
           "type": "string",
           "default": "unset",
@@ -1044,6 +1050,12 @@
             "priority",
             "sessions"
           ]
+        },
+        {
+          "key": "ui.right_panel_width",
+          "type": "integer or string",
+          "default": "\"45%\"",
+          "description": "Right files/diff panel width in cells, or a percentage string like \"45%\". Clamped so the panel and the tab area each keep at least 20 columns."
         },
         {
           "key": "ui.status_indicators",
@@ -1448,6 +1460,24 @@
           "type": "string",
           "default": "\"~/.herdr/worktrees\"",
           "description": "Root directory under which Herdr creates <repo>/<branch-slug> checkouts."
+        }
+      ]
+    },
+    {
+      "id": "right_panel",
+      "title": "Right panel",
+      "keys": [
+        {
+          "key": "right_panel.files_command",
+          "type": "string",
+          "default": "\"yazi\"",
+          "description": "Command the right panel runs in files mode, through /bin/sh -c in the focused agent's worktree or the focused pane's directory."
+        },
+        {
+          "key": "right_panel.diff_command",
+          "type": "string",
+          "default": "\"lazygit\"",
+          "description": "Command the right panel runs in diff mode, through /bin/sh -c in the focused agent's worktree or the focused pane's directory."
         }
       ]
     },

@@ -19,6 +19,15 @@ impl ClientShellState {
                 outcome.resize = true;
                 self.persist_chrome_preferences(outcome);
             }
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleRightPanel) => {
+                self.mode = ClientShellMode::Terminal;
+                self.push_endpoint_method(
+                    crate::api::schema::Method::RightPanelToggle(
+                        crate::api::schema::EmptyParams {},
+                    ),
+                    outcome,
+                );
+            }
             crate::input::KeybindMatch::Action(action) => {
                 if self.workspace_preview_action_blocked()
                     && matches!(

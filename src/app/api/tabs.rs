@@ -133,10 +133,25 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
         };
+        self.blur_right_panel();
         self.state.switch_workspace_tab(ws_idx, tab_idx);
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
         encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
+    pub(super) fn handle_right_panel_toggle(&mut self, id: String) -> String {
+        self.toggle_right_panel();
+        encode_success(id, ResponseResult::Ok {})
+    }
+
+    pub(super) fn handle_right_panel_show(
+        &mut self,
+        id: String,
+        params: crate::api::schema::RightPanelShowParams,
+    ) -> String {
+        self.show_right_panel(params.mode);
+        encode_success(id, ResponseResult::Ok {})
     }
 
     pub(super) fn handle_tab_rename(&mut self, id: String, params: TabRenameParams) -> String {
@@ -605,6 +620,7 @@ mod tests {
                 title: "resume me".into(),
                 cwd: cwd.display().to_string(),
                 context: String::new(),
+                worktree_path: None,
                 updated_at_ms: 0,
             });
     }
