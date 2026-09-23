@@ -11,6 +11,7 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 
 impl App {
     pub(crate) fn toggle_right_panel(&mut self) {
+        self.release_exited_right_panel_instances();
         let panel = &mut self.state.right_panel;
         panel.visible = !panel.visible;
         panel.focused = panel.visible;
@@ -18,11 +19,18 @@ impl App {
     }
 
     pub(crate) fn show_right_panel(&mut self, mode: RightPanelMode) {
+        self.release_exited_right_panel_instances();
         let panel = &mut self.state.right_panel;
         panel.mode = mode;
         panel.visible = true;
         panel.focused = true;
         self.request_right_panel_render();
+    }
+
+    fn release_exited_right_panel_instances(&mut self) {
+        for instance in self.state.right_panel.take_exited() {
+            self.release_right_panel_instance(instance);
+        }
     }
 
     pub(crate) fn focus_right_panel(&mut self, terminal_id: &str) -> bool {
@@ -52,10 +60,16 @@ impl App {
     }
 
     pub(crate) fn right_panel_pane_died(&mut self, pane_id: PaneId) -> bool {
-        let Some(instance) = self.state.right_panel.remove_by_pane(pane_id) else {
+        let Some(exit) = self
+            .state
+            .right_panel
+            .command_exited(pane_id, std::time::Instant::now())
+        else {
             return false;
         };
-        self.release_right_panel_instance(instance);
+        if let crate::right_panel::PanelExit::Released(instance) = exit {
+            self.release_right_panel_instance(instance);
+        }
         self.request_right_panel_render();
         true
     }
@@ -177,6 +191,8 @@ impl App {
             dir,
             pane_id,
             terminal_id,
+            spawned_at: std::time::Instant::now(),
+            exited: false,
         })
     }
 
@@ -219,6 +235,8 @@ mod tests {
             dir: PathBuf::from(dir),
             pane_id: PaneId::alloc(),
             terminal_id: TerminalId::alloc(),
+            spawned_at: std::time::Instant::now(),
+            exited: false,
         };
         app.state.terminals.insert(
             instance.terminal_id.clone(),
@@ -295,6 +313,7 @@ mod tests {
     fn pane_died_for_active_instance_hides_and_releases_it() {
         let mut app = test_app();
         let instance = install_instance(&mut app, RightPanelMode::Diff, "/a");
+        app.state.right_panel.instances[0].spawned_at -= crate::right_panel::FAILED_START_WINDOW;
         app.state.right_panel.activate(0);
         app.state.right_panel.visible = true;
         app.state.right_panel.focused = true;
@@ -305,6 +324,90 @@ mod tests {
         assert!(app.state.right_panel.instances.is_empty());
         assert!(!app.state.terminals.contains_key(&instance.terminal_id));
         assert!(!app.right_panel_pane_died(instance.pane_id));
+    }
+
+    #[test]
+    fn hide_show_hide_keeps_the_live_instance_for_reuse() {
+        let mut app = test_app();
+        let instance = install_instance(&mut app, RightPanelMode::Files, "/a");
+        app.state.right_panel.activate(0);
+
+        app.toggle_right_panel();
+        assert!(app.state.right_panel.visible);
+        app.toggle_right_panel();
+        assert!(!app.state.right_panel.visible && !app.state.right_panel.focused);
+        app.toggle_right_panel();
+        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
+        assert_eq!(
+            app.state.right_panel.active.as_ref(),
+            Some(&instance.terminal_id)
+        );
+        app.toggle_right_panel();
+
+        assert!(!app.state.right_panel.visible);
+        assert_eq!(app.state.right_panel.instances, vec![instance.clone()]);
+        assert!(app.state.terminals.contains_key(&instance.terminal_id));
+    }
+
+    #[test]
+    fn failed_start_stays_visible_and_the_next_show_respawns() {
+        let mut app = test_app();
+        let files = install_instance(&mut app, RightPanelMode::Files, "/a");
+        let diff = install_instance(&mut app, RightPanelMode::Diff, "/a");
+        app.state.right_panel.activate(1);
+        app.state.right_panel.mode = RightPanelMode::Diff;
+        app.state.right_panel.visible = true;
+        app.state.right_panel.target = Some((0, PaneId::alloc(), RightPanelMode::Diff));
+
+        assert!(app.right_panel_pane_died(diff.pane_id));
+        assert!(app.state.right_panel.visible);
+        assert!(app.state.terminals.contains_key(&diff.terminal_id));
+
+        app.show_right_panel(RightPanelMode::Files);
+
+        assert!(app.state.right_panel.visible);
+        assert_eq!(app.state.right_panel.mode, RightPanelMode::Files);
+        assert_eq!(app.state.right_panel.target, None);
+        assert_eq!(app.state.right_panel.instances, vec![files]);
+        assert!(!app.state.terminals.contains_key(&diff.terminal_id));
+    }
+
+    #[test]
+    fn failed_start_then_toggle_hides_and_the_next_toggle_shows_again() {
+        let mut app = test_app();
+        let diff = install_instance(&mut app, RightPanelMode::Diff, "/a");
+        app.state.right_panel.activate(0);
+        app.state.right_panel.mode = RightPanelMode::Diff;
+        app.state.right_panel.visible = true;
+
+        assert!(app.right_panel_pane_died(diff.pane_id));
+        app.toggle_right_panel();
+        assert!(!app.state.right_panel.visible);
+        assert!(app.state.right_panel.instances.is_empty());
+
+        app.toggle_right_panel();
+
+        assert!(app.state.right_panel.visible);
+        assert_eq!(app.state.right_panel.active, None);
+    }
+
+    #[test]
+    fn command_exit_after_startup_hides_then_show_opens_fresh() {
+        let mut app = test_app();
+        let mut files = install_instance(&mut app, RightPanelMode::Files, "/a");
+        files.spawned_at -= crate::right_panel::FAILED_START_WINDOW;
+        app.state.right_panel.instances[0].spawned_at = files.spawned_at;
+        app.state.right_panel.activate(0);
+        app.state.right_panel.visible = true;
+
+        assert!(app.right_panel_pane_died(files.pane_id));
+        assert!(!app.state.right_panel.visible);
+        assert!(app.state.right_panel.instances.is_empty());
+
+        app.toggle_right_panel();
+
+        assert!(app.state.right_panel.visible);
+        assert_eq!(app.state.right_panel.target, None);
     }
 
     #[test]

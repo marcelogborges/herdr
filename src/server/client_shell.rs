@@ -601,7 +601,24 @@ fn render_right_panel(
         buffer.set_string(label_x, panel.y, visible, header.fg(palette.overlay1));
     }
 
-    if focused {
+    if instance.exited {
+        let notice = format!(
+            " {} exited · click files/diff or prefix+i to close ",
+            state.command(instance.mode)
+        );
+        let row = content.y + content.height - 1;
+        let style = Style::default().bg(palette.red).fg(palette.panel_bg);
+        for x in content.x..content.x + content.width {
+            let cell = &mut buffer[(x, row)];
+            cell.reset();
+            cell.set_symbol(" ");
+            cell.set_style(style);
+        }
+        let visible: String = notice.chars().take(usize::from(content.width)).collect();
+        buffer.set_string(content.x, row, visible, style);
+    }
+
+    if focused && !instance.exited {
         *cursor = panel_cursor.map(|mut panel_cursor| {
             panel_cursor.x = panel_cursor.x.saturating_add(content.x);
             panel_cursor.y = panel_cursor.y.saturating_add(content.y);

@@ -11,6 +11,7 @@ use crate::terminal::TerminalId;
 
 pub(crate) const PUBLIC_ID_PREFIX: &str = "right-panel:";
 pub(crate) const MAX_INSTANCES: usize = 8;
+pub(crate) const FAILED_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 const MIN_PANEL_COLS: u16 = 20;
 const MIN_TAB_COLS: u16 = 20;
 const DEFAULT_WIDTH_PERCENT: u8 = 45;
@@ -103,6 +104,14 @@ pub(crate) struct RightPanelInstance {
     pub dir: PathBuf,
     pub pane_id: PaneId,
     pub terminal_id: TerminalId,
+    pub spawned_at: std::time::Instant,
+    pub exited: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PanelExit {
+    Released(RightPanelInstance),
+    KeptFailedStart,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,7 +188,19 @@ impl RightPanelState {
     pub(crate) fn find(&self, mode: RightPanelMode, dir: &Path) -> Option<usize> {
         self.instances
             .iter()
-            .position(|instance| instance.mode == mode && instance.dir == dir)
+            .position(|instance| !instance.exited && instance.mode == mode && instance.dir == dir)
+    }
+
+    pub(crate) fn take_exited(&mut self) -> Vec<RightPanelInstance> {
+        let (exited, live) = std::mem::take(&mut self.instances)
+            .into_iter()
+            .partition(|instance| instance.exited);
+        self.instances = live;
+        if self.active_instance().is_none() {
+            self.active = None;
+            self.target = None;
+        }
+        exited
     }
 
     pub(crate) fn activate(&mut self, index: usize) {
@@ -203,19 +224,30 @@ impl RightPanelState {
         evicted
     }
 
-    pub(crate) fn remove_by_pane(&mut self, pane_id: PaneId) -> Option<RightPanelInstance> {
+    pub(crate) fn command_exited(
+        &mut self,
+        pane_id: PaneId,
+        now: std::time::Instant,
+    ) -> Option<PanelExit> {
         let index = self
             .instances
             .iter()
             .position(|instance| instance.pane_id == pane_id)?;
+        let is_active = self.active.as_ref() == Some(&self.instances[index].terminal_id);
+        let failed_start =
+            now.saturating_duration_since(self.instances[index].spawned_at) < FAILED_START_WINDOW;
+        if is_active && self.visible && failed_start {
+            self.instances[index].exited = true;
+            return Some(PanelExit::KeptFailedStart);
+        }
         let instance = self.instances.remove(index);
-        if self.active.as_ref() == Some(&instance.terminal_id) {
+        if is_active {
             self.active = None;
             self.target = None;
             self.visible = false;
             self.focused = false;
         }
-        Some(instance)
+        Some(PanelExit::Released(instance))
     }
 
     pub(crate) fn focused_public_id(&self) -> Option<String> {
@@ -254,6 +286,8 @@ mod tests {
             dir: PathBuf::from(dir),
             pane_id: PaneId::alloc(),
             terminal_id: TerminalId::alloc(),
+            spawned_at: std::time::Instant::now(),
+            exited: false,
         }
     }
 
@@ -395,16 +429,56 @@ mod tests {
         state.activate(1);
         state.visible = true;
         state.focused = true;
+        let later = std::time::Instant::now() + FAILED_START_WINDOW;
 
         let background = state.instances[0].pane_id;
-        assert!(state.remove_by_pane(background).is_some());
+        assert!(matches!(
+            state.command_exited(background, later),
+            Some(PanelExit::Released(_))
+        ));
         assert!(state.visible);
 
         let active = state.active_instance().unwrap().pane_id;
-        assert!(state.remove_by_pane(active).is_some());
+        assert!(matches!(
+            state.command_exited(active, later),
+            Some(PanelExit::Released(_))
+        ));
         assert!(!state.visible && !state.focused);
         assert_eq!(state.active, None);
         assert!(state.instances.is_empty());
+        assert_eq!(state.command_exited(active, later), None);
+    }
+
+    #[test]
+    fn failed_start_keeps_the_panel_open_until_the_next_show() {
+        let mut state = RightPanelState {
+            instances: vec![
+                instance(RightPanelMode::Files, "/a"),
+                instance(RightPanelMode::Diff, "/a"),
+            ],
+            ..Default::default()
+        };
+        state.activate(1);
+        state.visible = true;
+        state.focused = true;
+        let diff = state.active_instance().unwrap().pane_id;
+
+        assert_eq!(
+            state.command_exited(diff, std::time::Instant::now()),
+            Some(PanelExit::KeptFailedStart)
+        );
+        assert!(state.visible);
+        assert!(state.active_instance().unwrap().exited);
+        assert_eq!(state.find(RightPanelMode::Diff, Path::new("/a")), None);
+        assert_eq!(state.find(RightPanelMode::Files, Path::new("/a")), Some(0));
+
+        let released = state.take_exited();
+
+        assert_eq!(released.len(), 1);
+        assert_eq!(released[0].pane_id, diff);
+        assert_eq!(state.active, None);
+        assert_eq!(state.target, None);
+        assert_eq!(state.instances.len(), 1);
     }
 
     #[test]
