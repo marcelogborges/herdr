@@ -134,6 +134,15 @@ herdr notification show <title> [--body TEXT] [--position top-left|top-right|bot
 
 `notification show` 使用配置的 `[ui.toast]` 投递方式。`--position` 只影响 Herdr 应用内的 toast。`--sound` 默认为 `none`;`done` 和 `request` 只在通知实际显示时播放已有的完成音和需要关注音。
 
+## 右侧面板
+
+```bash
+herdr right-panel open <PATH> [--line N]
+herdr right-panel toggle
+```
+
+`right-panel open` 以文件模式显示右侧面板并聚焦。对于文件，它会在该文件所在目录的新面板终端中运行 `[right_panel] open_command`（默认 `micro +{line} {path}; exec yazi {path}`）；对于目录，则在该目录打开文件视图。相对路径按当前目录解析，未提供 `--line` 时也支持 `PATH:LINE`。在你聚焦其他窗格或标签页、或切换面板之前，面板会停留在打开的文件上。在窗格内运行时会自动传递 `HERDR_PANE_ID`。
+
 ## 会话
 
 ```bash

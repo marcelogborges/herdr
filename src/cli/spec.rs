@@ -41,6 +41,7 @@ pub(super) fn command() -> Command {
         .subcommand(worktree_command())
         .subcommand(tab_command())
         .subcommand(notification_command())
+        .subcommand(right_panel_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
@@ -312,6 +313,18 @@ fn notification_command() -> Command {
                 ]))
                 .arg(option("sound", "SOUND").value_parser(["none", "done", "request"])),
         )
+}
+
+fn right_panel_command() -> Command {
+    Command::new("right-panel")
+        .about("Control the right files/diff panel")
+        .subcommand(
+            Command::new("open")
+                .about("Open a file at a line in the right panel, or a directory in files mode")
+                .arg(required("path", "PATH"))
+                .arg(option("line", "N")),
+        )
+        .subcommand(Command::new("toggle").about("Show or hide the right panel"))
 }
 
 fn agent_command() -> Command {

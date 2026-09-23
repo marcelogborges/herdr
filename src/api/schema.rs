@@ -121,6 +121,8 @@ pub enum Method {
     RightPanelToggle(EmptyParams),
     #[serde(rename = "right_panel.show")]
     RightPanelShow(RightPanelShowParams),
+    #[serde(rename = "right_panel.open")]
+    RightPanelOpen(RightPanelOpenParams),
     #[serde(rename = "agent.list")]
     AgentList(EmptyParams),
     #[serde(rename = "agent.get")]

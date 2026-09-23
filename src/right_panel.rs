@@ -109,6 +109,12 @@ pub(crate) struct RightPanelInstance {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingOpen {
+    pub dir: PathBuf,
+    pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PanelExit {
     Released(RightPanelInstance),
     KeptFailedStart,
@@ -122,6 +128,8 @@ pub(crate) struct RightPanelState {
     pub width: PopupSize,
     pub files_command: String,
     pub diff_command: String,
+    pub open_command: String,
+    pub pending_open: Option<PendingOpen>,
     pub instances: Vec<RightPanelInstance>,
     pub active: Option<TerminalId>,
     pub target: Option<(usize, PaneId, RightPanelMode)>,
@@ -137,6 +145,8 @@ impl Default for RightPanelState {
             width: default_width(),
             files_command: config.files_command,
             diff_command: config.diff_command,
+            open_command: config.open_command,
+            pending_open: None,
             instances: Vec::new(),
             active: None,
             target: None,
@@ -149,6 +159,7 @@ impl RightPanelState {
         self.width = width;
         self.files_command = config.files_command.clone();
         self.diff_command = config.diff_command.clone();
+        self.open_command = config.open_command.clone();
     }
 
     pub(crate) fn command(&self, mode: RightPanelMode) -> &str {
@@ -258,6 +269,74 @@ impl RightPanelState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpenTarget {
+    File { path: PathBuf, line: u32 },
+    Dir(PathBuf),
+}
+
+impl OpenTarget {
+    pub(crate) fn dir(&self) -> PathBuf {
+        match self {
+            Self::File { path, .. } => path
+                .parent()
+                .map_or_else(|| PathBuf::from("/"), Path::to_path_buf),
+            Self::Dir(dir) => dir.clone(),
+        }
+    }
+}
+
+pub(crate) fn resolve_open_target(
+    raw: &str,
+    line: Option<u32>,
+    base: &Path,
+) -> Result<OpenTarget, String> {
+    let absolute = |text: &str| {
+        let path = Path::new(text);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            base.join(path)
+        }
+    };
+    let literal = absolute(raw);
+    let (path, line) = if literal.exists() || line.is_some() {
+        (literal, line)
+    } else if let Some((path, parsed)) = split_path_line(raw) {
+        (absolute(path), Some(parsed))
+    } else {
+        (literal, None)
+    };
+    if path.is_dir() {
+        return Ok(OpenTarget::Dir(path));
+    }
+    if !path.is_file() {
+        return Err(format!("file not found: {}", path.display()));
+    }
+    Ok(OpenTarget::File {
+        path,
+        line: line.unwrap_or(1).max(1),
+    })
+}
+
+fn split_path_line(raw: &str) -> Option<(&str, u32)> {
+    let (path, line) = raw.rsplit_once(':')?;
+    let line = line.parse::<u32>().ok()?;
+    (!path.is_empty()).then_some((path, line))
+}
+
+pub(crate) fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+pub(crate) fn render_open_command(template: &str, path: &Path, line: u32) -> String {
+    let dir = path.parent().unwrap_or_else(|| Path::new("/"));
+    template
+        .replace("{path}", &shell_quote(&path.to_string_lossy()))
+        .replace("{dir}", &shell_quote(&dir.to_string_lossy()))
+        .replace("{line}", &line.max(1).to_string())
+}
+
 pub(crate) fn worktree_path(text: &str) -> Option<String> {
     const MARKER: &str = "-worktrees/";
     let marker = text.rfind(MARKER)?;
@@ -359,6 +438,109 @@ mod tests {
             resolve_dir(None, None, Some("/home".into())),
             PathBuf::from("/home")
         );
+    }
+
+    struct TempTree(PathBuf);
+
+    impl TempTree {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "herdr-right-panel-{}-{}",
+                std::process::id(),
+                TerminalId::alloc()
+            ));
+            std::fs::create_dir_all(root.join("src")).unwrap();
+            std::fs::write(root.join("src/a.rs"), "fn main() {}\n").unwrap();
+            std::fs::write(root.join("with space's.txt"), "x\n").unwrap();
+            Self(root)
+        }
+    }
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn open_target_resolves_relative_absolute_and_line_shorthand() {
+        let tree = TempTree::new();
+        let file = tree.0.join("src/a.rs");
+
+        assert_eq!(
+            resolve_open_target("src/a.rs", None, &tree.0),
+            Ok(OpenTarget::File {
+                path: file.clone(),
+                line: 1
+            })
+        );
+        assert_eq!(
+            resolve_open_target(file.to_str().unwrap(), Some(9), Path::new("/elsewhere")),
+            Ok(OpenTarget::File {
+                path: file.clone(),
+                line: 9
+            })
+        );
+        assert_eq!(
+            resolve_open_target("src/a.rs:42", None, &tree.0),
+            Ok(OpenTarget::File {
+                path: file.clone(),
+                line: 42
+            })
+        );
+        assert_eq!(
+            resolve_open_target("src/a.rs", Some(0), &tree.0),
+            Ok(OpenTarget::File {
+                path: file.clone(),
+                line: 1
+            })
+        );
+        assert_eq!(
+            resolve_open_target("src", None, &tree.0),
+            Ok(OpenTarget::Dir(tree.0.join("src")))
+        );
+        assert!(resolve_open_target("src/missing.rs", None, &tree.0).is_err());
+        assert!(resolve_open_target("src/a.rs:42", Some(3), &tree.0).is_err());
+        assert!(resolve_open_target("src/a.rs:x", None, &tree.0).is_err());
+    }
+
+    #[test]
+    fn open_target_dir_is_the_file_parent() {
+        let target = OpenTarget::File {
+            path: PathBuf::from("/r/src/a.rs"),
+            line: 3,
+        };
+        assert_eq!(target.dir(), PathBuf::from("/r/src"));
+        assert_eq!(
+            OpenTarget::Dir(PathBuf::from("/r")).dir(),
+            PathBuf::from("/r")
+        );
+    }
+
+    #[test]
+    fn open_command_quotes_paths_and_defaults_line() {
+        let tree = TempTree::new();
+        let path = tree.0.join("with space's.txt");
+        let quoted = shell_quote(path.to_str().unwrap());
+
+        let rendered = render_open_command(&RightPanelConfig::default().open_command, &path, 0);
+
+        assert_eq!(rendered, format!("micro +1 {quoted}; exec yazi {quoted}"));
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(
+            render_open_command(
+                "cd {dir} && vim +{line} {path}",
+                Path::new("/r/a b/c.rs"),
+                7
+            ),
+            "cd '/r/a b' && vim +7 '/r/a b/c.rs'"
+        );
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(render_open_command("printf %s {path}", &path, 1))
+            .output()
+            .unwrap();
+        assert_eq!(output.stdout, path.to_str().unwrap().as_bytes());
     }
 
     #[test]

@@ -15,6 +15,8 @@ impl App {
         let panel = &mut self.state.right_panel;
         panel.visible = !panel.visible;
         panel.focused = panel.visible;
+        panel.target = None;
+        panel.pending_open = None;
         self.request_right_panel_render();
     }
 
@@ -25,6 +27,24 @@ impl App {
         panel.visible = true;
         panel.focused = true;
         self.request_right_panel_render();
+    }
+
+    pub(crate) fn open_right_panel(&mut self, target: &crate::right_panel::OpenTarget) {
+        let command = match target {
+            crate::right_panel::OpenTarget::File { path, line } => {
+                Some(crate::right_panel::render_open_command(
+                    &self.state.right_panel.open_command,
+                    path,
+                    *line,
+                ))
+            }
+            crate::right_panel::OpenTarget::Dir(_) => None,
+        };
+        self.state.right_panel.pending_open = Some(crate::right_panel::PendingOpen {
+            dir: target.dir(),
+            command,
+        });
+        self.show_right_panel(RightPanelMode::Files);
     }
 
     fn release_exited_right_panel_instances(&mut self) {
@@ -81,6 +101,11 @@ impl App {
         let target = self.right_panel_target_pane();
         let mode = self.state.right_panel.mode;
         let key = target.map(|(ws_idx, pane_id)| (ws_idx, pane_id, mode));
+        if let Some(open) = self.state.right_panel.pending_open.take() {
+            self.state.right_panel.target = key;
+            self.activate_right_panel_open(open, panel);
+            return;
+        }
         if key.is_some()
             && key == self.state.right_panel.target
             && self.state.right_panel.active_instance().is_some()
@@ -93,8 +118,43 @@ impl App {
             self.state.right_panel.activate(index);
             return;
         }
+        let command = self.state.right_panel.command(mode).to_owned();
+        self.start_right_panel_instance(mode, dir, command, panel);
+    }
+
+    fn activate_right_panel_open(&mut self, open: right_panel::PendingOpen, panel: Rect) {
+        let existing = self
+            .state
+            .right_panel
+            .find(RightPanelMode::Files, &open.dir);
+        let Some(command) = open.command else {
+            if let Some(index) = existing {
+                self.state.right_panel.activate(index);
+            } else {
+                let command = self.state.right_panel.files_command.clone();
+                self.start_right_panel_instance(RightPanelMode::Files, open.dir, command, panel);
+            }
+            return;
+        };
+        if let Some(index) = existing {
+            let replaced = self.state.right_panel.instances.remove(index);
+            if self.state.right_panel.active.as_ref() == Some(&replaced.terminal_id) {
+                self.state.right_panel.active = None;
+            }
+            self.release_right_panel_instance(replaced);
+        }
+        self.start_right_panel_instance(RightPanelMode::Files, open.dir, command, panel);
+    }
+
+    fn start_right_panel_instance(
+        &mut self,
+        mode: RightPanelMode,
+        dir: PathBuf,
+        command: String,
+        panel: Rect,
+    ) {
         let content = right_panel::content_rect(panel);
-        match self.spawn_right_panel_instance(mode, dir, content.height, content.width) {
+        match self.spawn_right_panel_instance(mode, dir, &command, content.height, content.width) {
             Ok(instance) => {
                 self.state.right_panel.instances.push(instance);
                 let last = self.state.right_panel.instances.len() - 1;
@@ -158,10 +218,10 @@ impl App {
         &mut self,
         mode: RightPanelMode,
         dir: PathBuf,
+        command: &str,
         rows: u16,
         cols: u16,
     ) -> std::io::Result<RightPanelInstance> {
-        let command = self.state.right_panel.command(mode).to_owned();
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
         let launch_env =
@@ -171,7 +231,7 @@ impl App {
             rows.max(1),
             cols.max(1),
             dir.clone(),
-            &command,
+            command,
             &launch_env,
             crate::pane::AgentDetection::Disabled,
             self.state.pane_scrollback_limit_bytes,
@@ -408,6 +468,98 @@ mod tests {
 
         assert!(app.state.right_panel.visible);
         assert_eq!(app.state.right_panel.target, None);
+    }
+
+    #[test]
+    fn open_directory_pins_the_panel_until_focus_moves() {
+        let mut app = test_app();
+        let pane_id = app.state.workspaces[0].focused_pane_id().unwrap();
+        let pane_dir = app.right_panel_dir(Some((0, pane_id)));
+        let pinned = install_instance(&mut app, RightPanelMode::Files, "/pinned");
+        let pane_instance =
+            install_instance(&mut app, RightPanelMode::Files, pane_dir.to_str().unwrap());
+        let panel = Rect::new(60, 0, 40, 20);
+
+        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/pinned".into()));
+        app.sync_right_panel(panel);
+        assert_eq!(
+            app.state.right_panel.active.as_ref(),
+            Some(&pinned.terminal_id)
+        );
+        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
+        assert_eq!(app.state.right_panel.mode, RightPanelMode::Files);
+
+        app.sync_right_panel(panel);
+        assert_eq!(
+            app.state.right_panel.active.as_ref(),
+            Some(&pinned.terminal_id)
+        );
+
+        app.state.right_panel.target = Some((0, PaneId::alloc(), RightPanelMode::Files));
+        app.sync_right_panel(panel);
+        assert_eq!(
+            app.state.right_panel.active.as_ref(),
+            Some(&pane_instance.terminal_id)
+        );
+    }
+
+    #[test]
+    fn toggle_drops_the_pin_and_pending_open() {
+        let mut app = test_app();
+        let pane_id = app.state.workspaces[0].focused_pane_id().unwrap();
+        let pane_dir = app.right_panel_dir(Some((0, pane_id)));
+        let _pinned = install_instance(&mut app, RightPanelMode::Files, "/pinned");
+        let pane_instance =
+            install_instance(&mut app, RightPanelMode::Files, pane_dir.to_str().unwrap());
+        let panel = Rect::new(60, 0, 40, 20);
+        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/pinned".into()));
+        app.sync_right_panel(panel);
+
+        app.toggle_right_panel();
+        assert_eq!(app.state.right_panel.target, None);
+        app.toggle_right_panel();
+        app.sync_right_panel(panel);
+
+        assert_eq!(
+            app.state.right_panel.active.as_ref(),
+            Some(&pane_instance.terminal_id)
+        );
+
+        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/pinned".into()));
+        app.toggle_right_panel();
+        assert_eq!(app.state.right_panel.pending_open, None);
+    }
+
+    #[tokio::test]
+    async fn open_file_replaces_the_files_instance_for_its_directory() {
+        let mut app = test_app();
+        app.state.right_panel.open_command = "sleep 30".into();
+        let dir = std::env::temp_dir();
+        let file = dir.join(format!("herdr-open-{}.txt", std::process::id()));
+        std::fs::write(&file, "x\n").unwrap();
+        let old = install_instance(&mut app, RightPanelMode::Files, dir.to_str().unwrap());
+        let panel = Rect::new(60, 0, 40, 20);
+
+        app.open_right_panel(&crate::right_panel::OpenTarget::File {
+            path: file.clone(),
+            line: 3,
+        });
+        app.sync_right_panel(panel);
+
+        let active = app.state.right_panel.active_instance().cloned().unwrap();
+        assert_ne!(active.terminal_id, old.terminal_id);
+        assert_eq!(active.dir, dir);
+        assert_eq!(active.mode, RightPanelMode::Files);
+        assert!(!app.state.terminals.contains_key(&old.terminal_id));
+        assert_eq!(
+            app.state
+                .right_panel
+                .find(RightPanelMode::Files, &dir)
+                .map(|index| app.state.right_panel.instances[index].terminal_id.clone()),
+            Some(active.terminal_id.clone())
+        );
+        let _ = std::fs::remove_file(&file);
+        app.release_right_panel_instance(active);
     }
 
     #[test]

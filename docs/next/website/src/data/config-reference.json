@@ -1478,6 +1478,12 @@
           "type": "string",
           "default": "\"lazygit\"",
           "description": "Command the right panel runs in diff mode, through /bin/sh -c in the focused agent's worktree or the focused pane's directory."
+        },
+        {
+          "key": "right_panel.open_command",
+          "type": "string",
+          "default": "\"micro +{line} {path}; exec yazi {path}\"",
+          "description": "Command `herdr right-panel open` and `right_panel.open` run for a file, through /bin/sh -c in the file's directory. {path} and {dir} are replaced with shell-quoted paths and {line} with the line number (1 when none is given)."
         }
       ]
     },

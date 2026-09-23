@@ -521,6 +521,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::ClaudeSessionOpen(_) => "claude_session.open",
         Method::RightPanelToggle(_) => "right_panel.toggle",
         Method::RightPanelShow(_) => "right_panel.show",
+        Method::RightPanelOpen(_) => "right_panel.open",
         Method::AgentList(_) => "agent.list",
         Method::AgentGet(_) => "agent.get",
         Method::AgentRead(_) => "agent.read",

@@ -1084,6 +1084,9 @@ impl App {
             Method::RightPanelShow(params) => {
                 return self.handle_right_panel_show(request.id, params)
             }
+            Method::RightPanelOpen(params) => {
+                return self.handle_right_panel_open(request.id, params)
+            }
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),
             Method::TabMove(params) => return self.handle_tab_move(request.id, params),

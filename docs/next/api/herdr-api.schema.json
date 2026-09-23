@@ -3964,6 +3964,31 @@
           ],
           "type": "string"
         },
+        "RightPanelOpenParams": {
+          "properties": {
+            "line": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
         "RightPanelShowParams": {
           "properties": {
             "mode": {
@@ -5400,6 +5425,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/RightPanelShowParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelOpenParams"
             }
           },
           "required": [

@@ -930,13 +930,18 @@ pub struct RightPanelConfig {
     pub files_command: String,
     /// Command the right panel runs in diff mode. Default: "lazygit".
     pub diff_command: String,
+    /// Command `right_panel.open` runs for a file; {path}, {dir}, and {line} are substituted.
+    pub open_command: String,
 }
+
+pub const DEFAULT_RIGHT_PANEL_OPEN_COMMAND: &str = "micro +{line} {path}; exec yazi {path}";
 
 impl Default for RightPanelConfig {
     fn default() -> Self {
         Self {
             files_command: "yazi".to_owned(),
             diff_command: "lazygit".to_owned(),
+            open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
         }
     }
 }

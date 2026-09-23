@@ -236,6 +236,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [right_panel]
 # files_command = "yazi"
 # diff_command = "lazygit"
+# open_command = "micro +{line} {path}; exec yazi {path}"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -628,6 +629,7 @@ fn main() -> io::Result<()> {
         println!("       herdr worktree <subcommand> ...");
         println!("       herdr tab <subcommand> ...");
         println!("       herdr notification <subcommand> ...");
+        println!("       herdr right-panel <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
         println!("       herdr session <subcommand> ...");
@@ -679,6 +681,10 @@ fn main() -> io::Result<()> {
             (
                 "herdr notification <subcommand>",
                 "Notification helpers over the socket API",
+            ),
+            (
+                "herdr right-panel <subcommand>",
+                "Open files in the right files/diff panel",
             ),
             (
                 "herdr agent <subcommand>",
