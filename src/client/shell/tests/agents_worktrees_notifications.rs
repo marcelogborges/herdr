@@ -1487,6 +1487,7 @@ fn claude_session_rows_mark_live_sessions_and_show_folder_and_age() {
             session_id: "live".into(),
             title: "live session".into(),
             cwd: "/home/me/projects".into(),
+            context: String::new(),
             updated_at_ms: 10_000_000,
             pane_id: Some("pane_1".into()),
         },
@@ -1494,6 +1495,7 @@ fn claude_session_rows_mark_live_sessions_and_show_folder_and_age() {
             session_id: "closed".into(),
             title: "closed session".into(),
             cwd: "/home/me/tcc".into(),
+            context: "VK25-2904".into(),
             updated_at_ms: 10_000_000 - 2 * 3_600_000,
             pane_id: None,
         },
@@ -1509,6 +1511,6 @@ fn claude_session_rows_mark_live_sessions_and_show_folder_and_age() {
     assert_eq!(rows[0].hit.pane_id.as_deref(), Some("pane_1"));
     assert_eq!(rows[1].status, None);
     assert!(!rows[1].focused);
-    assert_eq!(rows[1].detail, "tcc · 2h");
+    assert_eq!(rows[1].detail, "VK25-2904 · 2h");
     assert_eq!(rows[1].hit.session_id, "closed");
 }

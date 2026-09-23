@@ -17,6 +17,7 @@ pub(crate) struct ClaudeSession {
     pub session_id: String,
     pub title: String,
     pub cwd: String,
+    pub context: String,
     pub updated_at_ms: u64,
 }
 
@@ -31,6 +32,7 @@ struct TranscriptState {
     custom_title: Option<String>,
     agent_name: Option<String>,
     first_prompt: Option<String>,
+    tool_worktree: Option<String>,
 }
 
 impl TranscriptState {
@@ -66,6 +68,11 @@ impl TranscriptState {
             }
             Some("user") if self.first_prompt.is_none() => {
                 self.first_prompt = first_prompt_text(&value).map(|text| truncate_title(&text));
+            }
+            Some("assistant") => {
+                if let Some(worktree) = last_tool_worktree(&value) {
+                    self.tool_worktree = Some(worktree);
+                }
             }
             _ => {}
         }
@@ -214,15 +221,78 @@ fn session_from_state(
         .clone()
         .or_else(|| path.file_stem()?.to_str().map(str::to_owned))
         .filter(|id| crate::agent_resume::AgentSessionRef::id(id).is_some())?;
+    let title = state.title()?.to_owned();
+    let cwd = state.cwd.clone()?;
+    let named_title = state
+        .custom_title
+        .as_deref()
+        .or(state.agent_name.as_deref())
+        .unwrap_or_default();
+    let context = session_context(&cwd, state.tool_worktree.as_deref(), named_title);
     Some(ClaudeSession {
         session_id,
-        title: state.title()?.to_owned(),
-        cwd: state.cwd.clone()?,
+        title,
+        cwd,
+        context,
         updated_at_ms: modified
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
             .unwrap_or_default(),
     })
+}
+
+const WORKTREE_MARKER: &str = "-worktrees/";
+
+fn session_context(cwd: &str, tool_worktree: Option<&str>, title: &str) -> String {
+    worktree_name(cwd)
+        .or_else(|| tool_worktree.map(str::to_owned))
+        .or_else(|| task_code(title))
+        .unwrap_or_else(|| {
+            Path::new(cwd)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(cwd)
+                .to_owned()
+        })
+}
+
+fn worktree_name(text: &str) -> Option<String> {
+    let (_, rest) = text.rsplit_once(WORKTREE_MARKER)?;
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .collect();
+    let name = name.trim_end_matches('.');
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+fn last_tool_worktree(value: &Value) -> Option<String> {
+    let blocks = value.get("message")?.get("content")?.as_array()?;
+    blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .filter_map(|block| block.get("input"))
+        .flat_map(|input| {
+            ["command", "file_path", "path", "notebook_path"]
+                .into_iter()
+                .filter_map(|key| input.get(key).and_then(Value::as_str))
+        })
+        .filter_map(worktree_name)
+        .next_back()
+}
+
+fn task_code(text: &str) -> Option<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .find_map(|word| {
+            let (prefix, number) = word.split_once('-')?;
+            let valid_prefix = prefix.len() >= 2
+                && prefix.starts_with(|c: char| c.is_ascii_uppercase())
+                && prefix
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+            let valid_number = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit());
+            (valid_prefix && valid_number).then(|| word.to_owned())
+        })
 }
 
 fn non_empty_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -447,6 +517,65 @@ mod tests {
         let sessions = scanner.scan();
         assert_eq!(sessions[0].title, "new");
         assert_eq!(sessions[0].cwd, "/x");
+    }
+
+    #[test]
+    fn context_prefers_cwd_worktree_then_tool_worktree_then_title_task_code() {
+        let dir = TestDir::new();
+        write_transcript(
+            dir.path(),
+            "p",
+            "a",
+            &[
+                r#"{"type":"user","sessionId":"a","cwd":"/r/vakinha-api-worktrees/VK25-2727-api","message":{"role":"user","content":"hi"}}"#,
+            ],
+        );
+        write_transcript(
+            dir.path(),
+            "p",
+            "b",
+            &[
+                r#"{"type":"user","sessionId":"b","cwd":"/r","message":{"role":"user","content":"VK25-123 in text only"}}"#,
+                r#"{"type":"assistant","sessionId":"b","cwd":"/r","message":{"content":[{"type":"tool_use","input":{"command":"cd /r/web-worktrees/VK25-1 && ls"}}]}}"#,
+                r#"{"type":"assistant","sessionId":"b","cwd":"/r","message":{"content":[{"type":"tool_use","input":{"file_path":"/r/web-worktrees/VK25-2904/src/a.ts"}}]}}"#,
+            ],
+        );
+        write_transcript(
+            dir.path(),
+            "p",
+            "c",
+            &[
+                r#"{"type":"user","sessionId":"c","cwd":"/r/extras","message":{"role":"user","content":"see VK25-9 docs"}}"#,
+                r#"{"type":"custom-title","customTitle":"VK25-2806 bug analysis","sessionId":"c"}"#,
+            ],
+        );
+        write_transcript(
+            dir.path(),
+            "p",
+            "d",
+            &[
+                r#"{"type":"user","sessionId":"d","cwd":"/home/me/projects","message":{"role":"user","content":"mentions VK25-77"}}"#,
+            ],
+        );
+
+        let mut sessions = ClaudeSessionScanner::new(dir.path()).scan();
+        sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        let contexts = sessions
+            .iter()
+            .map(|session| session.context.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contexts,
+            ["VK25-2727-api", "VK25-2904", "VK25-2806", "projects"]
+        );
+    }
+
+    #[test]
+    fn task_code_requires_uppercase_prefix_and_numeric_suffix() {
+        assert_eq!(task_code("fix VK25-12 now").as_deref(), Some("VK25-12"));
+        assert_eq!(task_code("ABC-7: thing").as_deref(), Some("ABC-7"));
+        assert_eq!(task_code("utf-8 and a-1 and V-2"), None);
+        assert_eq!(task_code("VK25-abc"), None);
     }
 
     #[test]

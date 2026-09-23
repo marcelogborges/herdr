@@ -421,10 +421,14 @@ pub(super) fn claude_session_rows(
                     .iter()
                     .find(|agent| agent.pane_id == pane_id)
             });
-            let folder = std::path::Path::new(&session.cwd)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(&session.cwd);
+            let folder = if session.context.is_empty() {
+                std::path::Path::new(&session.cwd)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&session.cwd)
+            } else {
+                session.context.as_str()
+            };
             ClaudeSessionRow {
                 hit: ClaudeSessionHit {
                     session_id: session.session_id.clone(),

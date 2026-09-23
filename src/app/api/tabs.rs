@@ -604,6 +604,7 @@ mod tests {
                 session_id: session_id.into(),
                 title: "resume me".into(),
                 cwd: cwd.display().to_string(),
+                context: String::new(),
                 updated_at_ms: 0,
             });
     }

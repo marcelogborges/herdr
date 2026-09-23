@@ -964,6 +964,9 @@ pub struct ClientShellClaudeSession {
     pub session_id: String,
     pub title: String,
     pub cwd: String,
+    /// Worktree or task code the session works on, falling back to the cwd name.
+    #[serde(default)]
+    pub context: String,
     pub updated_at_ms: u64,
     /// Pane currently running this session, when one reported it.
     pub pane_id: Option<String>,
@@ -2764,6 +2767,7 @@ mod tests {
                 session_id: "0da32074-acd6-4c79-9d29-aac5cc63ca81".into(),
                 title: "resume me".into(),
                 cwd: "/repo".into(),
+                context: "repo".into(),
                 updated_at_ms: 1_700_000_000_000,
                 pane_id: Some("w1:p1".into()),
             }],

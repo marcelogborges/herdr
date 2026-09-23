@@ -167,6 +167,7 @@ pub(super) fn snapshot_with_completions(
             session_id: session.session_id.clone(),
             title: session.title.clone(),
             cwd: session.cwd.clone(),
+            context: session.context.clone(),
             updated_at_ms: session.updated_at_ms,
             pane_id: live_claude_sessions.get(&session.session_id).cloned(),
         })
