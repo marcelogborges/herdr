@@ -1985,15 +1985,7 @@ impl ClientShellState {
                     return;
                 }
                 if super::contains(self.hits.agent_sort_toggle, point) {
-                    let sort = match self.config.agent_panel_sort {
-                        crate::config::AgentPanelSortConfig::Spaces => {
-                            crate::config::AgentPanelSortConfig::Priority
-                        }
-                        crate::config::AgentPanelSortConfig::Priority => {
-                            crate::config::AgentPanelSortConfig::Spaces
-                        }
-                    };
-                    self.config.agent_panel_sort = sort;
+                    self.config.agent_panel_sort = self.config.agent_panel_sort.next();
                     self.agent_panel_sort_manual = true;
                     self.agent_scroll = 0;
                     self.persist_chrome_preferences(outcome);
@@ -2128,6 +2120,31 @@ impl ClientShellState {
                         }),
                         outcome,
                     );
+                    return;
+                }
+                let claude_session = self
+                    .hits
+                    .claude_sessions
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, hit)| hit.clone());
+                if let Some(hit) = claude_session {
+                    let method =
+                        match hit.pane_id {
+                            Some(pane_id) => crate::api::schema::Method::PaneFocus(
+                                crate::api::schema::PaneTarget { pane_id },
+                            ),
+                            None => crate::api::schema::Method::ClaudeSessionOpen(
+                                crate::api::schema::ClaudeSessionOpenParams {
+                                    session_id: hit.session_id,
+                                    workspace_id: self
+                                        .snapshot
+                                        .as_deref()
+                                        .and_then(|snapshot| snapshot.focused_workspace_id.clone()),
+                                },
+                            ),
+                        };
+                    self.push_endpoint_method(method, outcome);
                     return;
                 }
                 let scrollbar_hit = self

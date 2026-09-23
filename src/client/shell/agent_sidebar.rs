@@ -67,6 +67,27 @@ pub(super) fn render_agent_panel(
         return;
     }
 
+    if snapshot.agent_view_label.is_none()
+        && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Sessions
+    {
+        let rows = claude_session_rows(snapshot, std::time::SystemTime::now());
+        render_agent_list(
+            buffer,
+            area,
+            &rows,
+            Some(" no claude sessions"),
+            config,
+            agent_scroll,
+            hits,
+            |_| 2,
+            |buffer, rect, row, hits| {
+                hits.claude_sessions.push((rect, row.hit.clone()));
+                render_claude_session_row(buffer, rect, row, config);
+            },
+        );
+        return;
+    }
+
     let rows = agent_rows(snapshot, config, None);
     render_agent_list(
         buffer,
@@ -121,6 +142,7 @@ pub(super) fn render_agent_panel_header(
     let sort_label = agent_view_label.unwrap_or(match config.agent_panel_sort {
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
+        crate::config::AgentPanelSortConfig::Sessions => "sessions",
     });
     let sort_width = display_width(sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
@@ -367,6 +389,113 @@ pub(super) fn render_agent_row(
             rect.width.saturating_sub(indent as u16) as usize,
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
+            Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
+            buffer,
+        );
+    }
+}
+
+pub(super) struct ClaudeSessionRow {
+    pub(super) hit: ClaudeSessionHit,
+    pub(super) status: Option<crate::api::schema::AgentStatus>,
+    pub(super) focused: bool,
+    pub(super) title: String,
+    pub(super) detail: String,
+}
+
+pub(super) fn claude_session_rows(
+    snapshot: &ClientShellSnapshot,
+    now: std::time::SystemTime,
+) -> Vec<ClaudeSessionRow> {
+    let now_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default();
+    snapshot
+        .claude_sessions
+        .iter()
+        .map(|session| {
+            let agent = session.pane_id.as_deref().and_then(|pane_id| {
+                snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == pane_id)
+            });
+            let folder = std::path::Path::new(&session.cwd)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&session.cwd);
+            ClaudeSessionRow {
+                hit: ClaudeSessionHit {
+                    session_id: session.session_id.clone(),
+                    pane_id: session.pane_id.clone(),
+                },
+                status: agent.map(|agent| agent.agent_status),
+                focused: agent.is_some_and(|agent| agent.focused),
+                title: session.title.clone(),
+                detail: format!(
+                    "{folder} · {}",
+                    relative_age(now_ms.saturating_sub(session.updated_at_ms))
+                ),
+            }
+        })
+        .collect()
+}
+
+fn relative_age(elapsed_ms: u64) -> String {
+    let seconds = elapsed_ms / 1000;
+    match seconds {
+        0..=59 => "now".to_owned(),
+        60..=3_599 => format!("{}m", seconds / 60),
+        3_600..=86_399 => format!("{}h", seconds / 3_600),
+        _ => format!("{}d", seconds / 86_400),
+    }
+}
+
+fn render_claude_session_row(
+    buffer: &mut Buffer,
+    rect: Rect,
+    row: &ClaudeSessionRow,
+    config: &ClientShellConfig,
+) {
+    let palette = &config.palette;
+    let row_style = if row.focused {
+        Style::default().bg(palette.active_row_bg)
+    } else {
+        Style::default()
+    };
+    let title_style = if row.focused {
+        Style::default()
+            .fg(palette.text)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(palette.subtext0)
+            .add_modifier(Modifier::BOLD)
+    };
+    let icon = row.status.map_or_else(
+        || (" ".to_owned(), Style::default()),
+        |status| {
+            (
+                status_icon(status, config.status_indicators).to_owned(),
+                Style::default().fg(status_color(status, palette)),
+            )
+        },
+    );
+    let lines = [
+        Line::from(vec![
+            ratatui::text::Span::raw(" "),
+            ratatui::text::Span::styled(icon.0, icon.1),
+            ratatui::text::Span::raw(" "),
+            ratatui::text::Span::styled(row.title.clone(), title_style),
+        ]),
+        Line::from(vec![
+            ratatui::text::Span::raw("   "),
+            ratatui::text::Span::styled(row.detail.clone(), Style::default().fg(palette.overlay0)),
+        ]),
+    ];
+    for (index, line) in lines.into_iter().take(rect.height as usize).enumerate() {
+        Paragraph::new(line).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,
         );

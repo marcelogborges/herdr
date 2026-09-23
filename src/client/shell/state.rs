@@ -81,6 +81,12 @@ pub(super) enum ClientMobileTarget {
     Menu(usize),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ClaudeSessionHit {
+    pub(super) session_id: String,
+    pub(super) pane_id: Option<String>,
+}
+
 #[derive(Default)]
 pub(super) struct ShellHitMap {
     pub(super) machines: Vec<MachineHit>,
@@ -94,6 +100,7 @@ pub(super) struct ShellHitMap {
     pub(super) popup: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
+    pub(super) claude_sessions: Vec<(Rect, ClaudeSessionHit)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,

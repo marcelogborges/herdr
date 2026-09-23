@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabRenameParams, TabTarget,
+    ClaudeSessionOpenParams, EventData, EventEnvelope, EventKind, PaneTarget, ResponseResult,
+    TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -300,6 +300,110 @@ impl App {
     }
 }
 
+impl App {
+    pub(super) fn handle_claude_session_open(
+        &mut self,
+        id: String,
+        params: ClaudeSessionOpenParams,
+    ) -> String {
+        let Some(session_ref) = crate::agent_resume::AgentSessionRef::id(params.session_id.trim())
+        else {
+            return encode_error(id, "invalid_session_id", "invalid claude session id");
+        };
+        if let Some(pane_id) = self.live_claude_session_pane_id(&session_ref.value) {
+            return self.handle_pane_focus(id, PaneTarget { pane_id });
+        }
+        let Some(session) = self
+            .claude_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|session| session.session_id == session_ref.value)
+            .cloned()
+        else {
+            return encode_error(
+                id,
+                "claude_session_not_found",
+                format!("claude session {} not found", session_ref.value),
+            );
+        };
+        if !std::path::Path::new(&session.cwd).is_dir() {
+            return encode_error(
+                id,
+                "claude_session_cwd_unavailable",
+                format!("directory {} is unavailable", session.cwd),
+            );
+        }
+        let Some(command) = crate::agent_resume::plan("herdr:claude", "claude", &session_ref)
+            .and_then(|plan| super::super::agent_resume::shell_command_from_argv(&plan.argv))
+        else {
+            return encode_error(id, "claude_session_resume_failed", "no resume command");
+        };
+        let response = self.handle_tab_create(
+            id,
+            TabCreateParams {
+                workspace_id: params.workspace_id,
+                cwd: Some(session.cwd),
+                focus: true,
+                label: Some(session.title),
+                env: Default::default(),
+            },
+        );
+        let terminal_id = serde_json::from_str::<serde_json::Value>(&response)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/result/tab/tab_id")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .and_then(|tab_id| self.parse_tab_id(&tab_id))
+            .and_then(|(ws_idx, tab_idx)| {
+                let root_pane = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)?
+                    .tabs
+                    .get(tab_idx)?
+                    .root_pane;
+                self.find_pane(root_pane)
+                    .map(|(_, pane)| pane.attached_terminal_id.clone())
+            });
+        if let Some(runtime) = terminal_id
+            .as_ref()
+            .and_then(|terminal_id| self.terminal_runtimes.get(terminal_id))
+        {
+            let mut input = command;
+            input.push('\r');
+            if let Err(err) = runtime.try_send_bytes(bytes::Bytes::from(input)) {
+                tracing::warn!(err = %err, "failed to send claude resume command");
+            }
+        }
+        response
+    }
+
+    fn live_claude_session_pane_id(&self, session_id: &str) -> Option<String> {
+        self.state
+            .workspaces
+            .iter()
+            .enumerate()
+            .flat_map(|(ws_idx, ws)| {
+                ws.tabs
+                    .iter()
+                    .flat_map(|tab| tab.layout.pane_ids())
+                    .map(move |pane_id| (ws_idx, pane_id))
+            })
+            .find_map(|(ws_idx, pane_id)| {
+                let info = self.pane_info(ws_idx, pane_id)?;
+                let session = info.agent_session.as_ref()?;
+                (session.agent == "claude"
+                    && session.kind == crate::agent_resume::AgentSessionRefKind::Id
+                    && session.value == session_id)
+                    .then_some(info.pane_id)
+            })
+    }
+}
+
 fn workspace_not_found(id: String, workspace_id: &str) -> String {
     encode_error(
         id,
@@ -472,5 +576,114 @@ mod tests {
             crate::worktree::canonical_or_original(&cached_cwd)
         );
         shutdown_test_runtimes(&mut app);
+    }
+
+    fn claude_session_test_app() -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("claude")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        app
+    }
+
+    fn index_claude_session(app: &App, session_id: &str, cwd: &std::path::Path) {
+        app.claude_sessions
+            .lock()
+            .unwrap()
+            .push(crate::claude_sessions::ClaudeSession {
+                session_id: session_id.into(),
+                title: "resume me".into(),
+                cwd: cwd.display().to_string(),
+                updated_at_ms: 0,
+            });
+    }
+
+    #[tokio::test]
+    async fn claude_session_open_creates_focused_tab_in_session_cwd() {
+        let mut app = claude_session_test_app();
+        let cwd = std::env::temp_dir();
+        index_claude_session(&app, "session-a", &cwd);
+
+        let response = app.handle_claude_session_open(
+            "req".into(),
+            ClaudeSessionOpenParams {
+                session_id: "session-a".into(),
+                workspace_id: Some(app.public_workspace_id(0)),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        let workspace = &app.state.workspaces[0];
+        assert_eq!(workspace.tabs.len(), 2);
+        assert_eq!(workspace.active_tab_index(), 1);
+        let created = &workspace.tabs[1];
+        assert_eq!(created.custom_name.as_deref(), Some("resume me"));
+        let terminal_id = created.terminal_id(created.root_pane).unwrap();
+        assert_eq!(
+            crate::worktree::canonical_or_original(&app.state.terminals[terminal_id].cwd),
+            crate::worktree::canonical_or_original(&cwd)
+        );
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn claude_session_open_focuses_pane_already_running_session() {
+        let mut app = claude_session_test_app();
+        index_claude_session(&app, "session-live", &std::env::temp_dir());
+        let root_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .terminal_id(root_pane)
+            .cloned()
+            .unwrap();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("session-live").unwrap(),
+        });
+
+        let response = app.handle_claude_session_open(
+            "req".into(),
+            ClaudeSessionOpenParams {
+                session_id: "session-live".into(),
+                workspace_id: None,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(!matches!(success.result, ResponseResult::TabCreated { .. }));
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[test]
+    fn claude_session_open_rejects_unknown_session() {
+        let mut app = claude_session_test_app();
+
+        let response = app.handle_claude_session_open(
+            "req".into(),
+            ClaudeSessionOpenParams {
+                session_id: "missing".into(),
+                workspace_id: None,
+            },
+        );
+
+        let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "claude_session_not_found");
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
     }
 }

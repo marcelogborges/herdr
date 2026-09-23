@@ -99,6 +99,17 @@ pub enum AgentPanelSortConfig {
     #[serde(alias = "workspaces")]
     Spaces,
     Priority,
+    Sessions,
+}
+
+impl AgentPanelSortConfig {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Spaces => Self::Priority,
+            Self::Priority => Self::Sessions,
+            Self::Sessions => Self::Spaces,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1413,6 +1424,14 @@ startup_per_agent_delay_ms = 0
     }
 
     #[test]
+    fn agent_panel_sort_cycles_grouped_priority_sessions() {
+        let start = AgentPanelSortConfig::Spaces;
+        assert_eq!(start.next(), AgentPanelSortConfig::Priority);
+        assert_eq!(start.next().next(), AgentPanelSortConfig::Sessions);
+        assert_eq!(start.next().next().next(), start);
+    }
+
+    #[test]
     fn agent_panel_sort_config_parses_alias_and_defaults() {
         assert_eq!(
             Config::default().ui.agent_panel_sort,
@@ -1432,6 +1451,13 @@ agent_panel_sort = "workspaces"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
+
+        let toml = r#"
+[ui]
+agent_panel_sort = "sessions"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Sessions);
 
         let toml = r#"
 [ui]

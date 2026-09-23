@@ -148,6 +148,29 @@ pub(super) fn snapshot_with_completions(
             }
         })
         .collect();
+    let live_claude_sessions = snapshot
+        .agents
+        .iter()
+        .filter_map(|agent| {
+            let session = agent.agent_session.as_ref()?;
+            (session.agent == "claude"
+                && session.kind == crate::agent_resume::AgentSessionRefKind::Id)
+                .then(|| (session.value.clone(), agent.pane_id.clone()))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let claude_sessions = app
+        .claude_sessions
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|session| protocol::ClientShellClaudeSession {
+            session_id: session.session_id.clone(),
+            title: session.title.clone(),
+            cwd: session.cwd.clone(),
+            updated_at_ms: session.updated_at_ms,
+            pane_id: live_claude_sessions.get(&session.session_id).cloned(),
+        })
+        .collect();
     let agents = snapshot
         .agents
         .into_iter()
@@ -263,6 +286,7 @@ pub(super) fn snapshot_with_completions(
         panes,
         agents,
         commands: app.client_shell_command_manifest(),
+        claude_sessions,
     };
     (shell, completions)
 }
