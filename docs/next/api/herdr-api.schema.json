@@ -3053,8 +3053,24 @@
                 "null"
               ]
             },
+            "origin_pid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "pane_id": {
               "type": "string"
+            },
+            "process_group_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "seq": {
               "format": "uint64",
@@ -3072,6 +3088,12 @@
             },
             "source": {
               "type": "string"
+            },
+            "terminal_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [

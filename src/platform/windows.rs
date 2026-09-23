@@ -1650,6 +1650,34 @@ fn fresh_foreground_processes() -> Arc<ProcessSnapshot> {
     cache.snapshot(Duration::ZERO, snapshot_processes)
 }
 
+pub fn process_is_descendant_of(pid: u32, ancestor_pid: u32) -> bool {
+    let snapshot = fresh_foreground_processes();
+    let Some(process) = snapshot.entry(pid) else {
+        return false;
+    };
+    let Some(ancestor) = snapshot.entry(ancestor_pid) else {
+        return false;
+    };
+    let Some(process_identity) = ProcessIdentity::open(pid) else {
+        return false;
+    };
+    let Some(ancestor_identity) = ProcessIdentity::open(ancestor_pid) else {
+        return false;
+    };
+    let (Some(process_start), Some(ancestor_start)) = (
+        process_identity.creation_time(),
+        ancestor_identity.creation_time(),
+    ) else {
+        return false;
+    };
+    process_identity.running()
+        && ancestor_identity.running()
+        && process.command().creation_time == Some(process_start)
+        && ancestor.command().creation_time == Some(ancestor_start)
+        && ancestor_start <= process_start
+        && process_is_ancestor(ancestor_pid, pid, &snapshot)
+}
+
 fn prepare_cached_foreground_selection(
     shell_pid: u32,
     snapshot: &ProcessSnapshot,
@@ -3631,6 +3659,20 @@ mod tests {
         assert_eq!(job.process_group_id, 20);
         assert_eq!(job.processes.len(), 1);
         assert_eq!(job.processes[0].name, "codex.exe");
+    }
+
+    #[test]
+    fn hook_origin_must_descend_from_current_codex_not_shared_pane_shell() {
+        let snapshot = super::ProcessSnapshot::new(vec![
+            test_entry(10, 1, "powershell.exe", &["powershell.exe"]),
+            test_entry(20, 10, "codex.exe", &["codex.exe"]),
+            test_entry(21, 20, "powershell.exe", &["powershell.exe"]),
+            test_entry(30, 10, "codex.exe", &["codex.exe"]),
+            test_entry(31, 30, "powershell.exe", &["powershell.exe"]),
+        ]);
+        assert!(super::process_is_ancestor(10, 21, &snapshot));
+        assert!(!super::process_is_ancestor(30, 21, &snapshot));
+        assert!(super::process_is_ancestor(30, 31, &snapshot));
     }
 
     #[test]
