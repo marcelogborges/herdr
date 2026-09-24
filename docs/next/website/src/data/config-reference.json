@@ -1546,6 +1546,12 @@
           "description": "Directories searched for <repo>-worktrees/<KEY>* checkouts when the session action has no Claude session to focus or resume."
         },
         {
+          "key": "jira.worktree_gc_command",
+          "type": "string",
+          "default": "\"vk-wt gc\"",
+          "description": "Worktree cleaner run by the board's limpar worktrees button. It first runs as a dry-run and shows what would be removed; --apply is appended only after you confirm."
+        },
+        {
           "key": "jira.refresh_seconds",
           "type": "integer",
           "default": "60",

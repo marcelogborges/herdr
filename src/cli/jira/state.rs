@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
+use super::gc::GcReport;
 use super::herdr::{link_sessions, preselect_key, LinkedSession};
 use super::model::{group_issues, Issue, IssueDetail, Transition};
 use super::worker::{Job, Outcome};
@@ -23,6 +24,9 @@ pub(crate) enum Action {
     Back,
     Send,
     Cancel,
+    CleanWorktrees,
+    Confirm,
+    Close,
 }
 
 impl Action {
@@ -37,6 +41,9 @@ impl Action {
             Self::Back => "esc voltar",
             Self::Send => "ctrl+s enviar",
             Self::Cancel => "esc cancelar",
+            Self::CleanWorktrees => "L limpar worktrees",
+            Self::Confirm => "enter confirmar",
+            Self::Close => "esc fechar",
         }
     }
 }
@@ -100,6 +107,19 @@ pub(crate) enum Popup {
         cursor: usize,
         sending: bool,
     },
+    WorktreeGc {
+        phase: GcPhase,
+        scroll: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum GcPhase {
+    Loading,
+    Preview(GcReport),
+    Applying(GcReport),
+    Done(GcReport),
+    Failed(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -499,6 +519,51 @@ impl JiraState {
                 self.notify(format!("{key} atribuída a {name}"), false);
                 effects.jobs.extend(self.start_refresh());
             }
+            Outcome::WorktreeGc { apply, result } => {
+                let phase = match (&self.popup, apply) {
+                    (
+                        Some(Popup::WorktreeGc {
+                            phase: GcPhase::Loading,
+                            ..
+                        }),
+                        false,
+                    ) => Some(match &result {
+                        Ok(report) => GcPhase::Preview(report.clone()),
+                        Err(error) => GcPhase::Failed(error.clone()),
+                    }),
+                    (
+                        Some(Popup::WorktreeGc {
+                            phase: GcPhase::Applying(_),
+                            ..
+                        }),
+                        true,
+                    ) => Some(match &result {
+                        Ok(report) => GcPhase::Done(report.clone()),
+                        Err(error) => GcPhase::Failed(error.clone()),
+                    }),
+                    _ => None,
+                };
+                match phase {
+                    Some(phase) => self.popup = Some(Popup::WorktreeGc { phase, scroll: 0 }),
+                    None if apply => match &result {
+                        Ok(report) => self.notify(
+                            report
+                                .summary
+                                .clone()
+                                .unwrap_or_else(|| "limpeza de worktrees concluída".into()),
+                            false,
+                        ),
+                        Err(error) => self.notify(error.clone(), true),
+                    },
+                    None => {}
+                }
+                if apply {
+                    effects.jobs.extend(self.start_refresh());
+                    if let View::Detail { key, .. } = &self.view {
+                        effects.jobs.push(Job::Detail(key.clone()));
+                    }
+                }
+            }
             Outcome::Notice(text) => self.notify(text, false),
             Outcome::Failed(text) => self.notify(text, true),
         }
@@ -520,7 +585,37 @@ impl JiraState {
                     self.ensure_visible();
                 }
             }
-            Action::Cancel => self.popup = None,
+            Action::Cancel | Action::Close => self.popup = None,
+            Action::CleanWorktrees => {
+                if !matches!(
+                    self.popup,
+                    Some(Popup::WorktreeGc {
+                        phase: GcPhase::Applying(_),
+                        ..
+                    })
+                ) {
+                    self.popup = Some(Popup::WorktreeGc {
+                        phase: GcPhase::Loading,
+                        scroll: 0,
+                    });
+                    effects.jobs.push(Job::WorktreeGc { apply: false });
+                }
+            }
+            Action::Confirm => {
+                if let Some(Popup::WorktreeGc { phase, scroll }) = &mut self.popup {
+                    match phase {
+                        GcPhase::Preview(report) if report.has_work() => {
+                            *phase = GcPhase::Applying(report.clone());
+                            *scroll = 0;
+                            effects.jobs.push(Job::WorktreeGc { apply: true });
+                        }
+                        GcPhase::Preview(_) | GcPhase::Done(_) | GcPhase::Failed(_) => {
+                            self.popup = None
+                        }
+                        GcPhase::Loading | GcPhase::Applying(_) => {}
+                    }
+                }
+            }
             Action::Send => effects.jobs.extend(self.send_comment()),
             Action::Move
             | Action::Comment
@@ -688,6 +783,18 @@ impl JiraState {
                     }
                     return Effects::default();
                 }
+                Popup::WorktreeGc { scroll, .. } => {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => return self.action(Action::Close),
+                        KeyCode::Enter => return self.action(Action::Confirm),
+                        KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+                        KeyCode::Down | KeyCode::Char('j') => *scroll += 1,
+                        KeyCode::PageUp => *scroll = scroll.saturating_sub(5),
+                        KeyCode::PageDown => *scroll += 5,
+                        _ => {}
+                    }
+                    return Effects::default();
+                }
                 Popup::Transitions {
                     transitions,
                     selected,
@@ -723,6 +830,7 @@ impl JiraState {
             KeyCode::Char('o') => Some(Action::Browser),
             KeyCode::Char('w') => Some(Action::Session),
             KeyCode::Char('r') => Some(Action::Refresh),
+            KeyCode::Char('L') => Some(Action::CleanWorktrees),
             _ => None,
         };
         if let Some(action) = action {
@@ -839,6 +947,14 @@ impl JiraState {
                 (*selected + 1).min(count.saturating_sub(1))
             } else {
                 selected.saturating_sub(1)
+            };
+            return;
+        }
+        if let Some(Popup::WorktreeGc { scroll, .. }) = &mut self.popup {
+            *scroll = if down {
+                *scroll + WHEEL_STEP
+            } else {
+                scroll.saturating_sub(WHEEL_STEP)
             };
             return;
         }
@@ -1240,5 +1356,154 @@ pub(crate) mod tests {
 
         assert_eq!(state.rows.len(), 5);
         assert_eq!(state.list_error.as_deref(), Some("falha de rede"));
+    }
+
+    fn gc_report(removable: &[&str]) -> GcReport {
+        GcReport {
+            summary: Some(format!(
+                "3 worktrees | {} removiveis (~1MB) | 0 orfas | 2 mantidas",
+                removable.len()
+            )),
+            removable: removable.iter().map(|row| (*row).to_owned()).collect(),
+            orphans: Vec::new(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn shift(ch: char) -> KeyEvent {
+        KeyEvent {
+            modifiers: KeyModifiers::SHIFT,
+            ..press(KeyCode::Char(ch))
+        }
+    }
+
+    #[test]
+    fn clean_worktrees_runs_dry_run_then_applies_only_after_confirm() {
+        let mut state = loaded_state();
+        let effects = state.key(shift('L'));
+        assert_eq!(effects.jobs, [Job::WorktreeGc { apply: false }]);
+        assert_eq!(
+            state.popup,
+            Some(Popup::WorktreeGc {
+                phase: GcPhase::Loading,
+                scroll: 0
+            })
+        );
+        assert!(state.key(press(KeyCode::Enter)).jobs.is_empty());
+
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Ok(gc_report(&["a-worktrees/K-1  pr=merged  1MB"])),
+        });
+        assert!(matches!(
+            state.popup,
+            Some(Popup::WorktreeGc {
+                phase: GcPhase::Preview(_),
+                ..
+            })
+        ));
+
+        let effects = state.key(press(KeyCode::Enter));
+        assert_eq!(effects.jobs, [Job::WorktreeGc { apply: true }]);
+        assert!(matches!(
+            state.popup,
+            Some(Popup::WorktreeGc {
+                phase: GcPhase::Applying(_),
+                ..
+            })
+        ));
+        assert!(state.action(Action::Confirm).jobs.is_empty());
+
+        state.loading = false;
+        let effects = state.apply(Outcome::WorktreeGc {
+            apply: true,
+            result: Ok(GcReport {
+                summary: Some("1 worktrees removidas, 0 orfas podadas.".into()),
+                ..GcReport::default()
+            }),
+        });
+        assert!(effects.jobs.contains(&Job::Refresh));
+        assert!(matches!(
+            state.popup,
+            Some(Popup::WorktreeGc {
+                phase: GcPhase::Done(_),
+                ..
+            })
+        ));
+        state.key(press(KeyCode::Esc));
+        assert_eq!(state.popup, None);
+    }
+
+    #[test]
+    fn nothing_to_remove_only_closes_and_cancel_never_applies() {
+        let mut state = loaded_state();
+        state.action(Action::CleanWorktrees);
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Ok(gc_report(&[])),
+        });
+        assert!(state.key(press(KeyCode::Enter)).jobs.is_empty());
+        assert_eq!(state.popup, None);
+
+        state.action(Action::CleanWorktrees);
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Ok(gc_report(&["a-worktrees/K-1  pr=merged  1MB"])),
+        });
+        assert!(state.key(press(KeyCode::Esc)).jobs.is_empty());
+        assert_eq!(state.popup, None);
+
+        state.action(Action::CleanWorktrees);
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Err("vk-wt: comando não encontrado".into()),
+        });
+        assert_eq!(
+            state.popup,
+            Some(Popup::WorktreeGc {
+                phase: GcPhase::Failed("vk-wt: comando não encontrado".into()),
+                scroll: 0
+            })
+        );
+        assert!(state.action(Action::Confirm).jobs.is_empty());
+        assert_eq!(state.popup, None);
+    }
+
+    #[test]
+    fn apply_result_after_closing_the_popup_becomes_a_notice_and_refreshes() {
+        let mut state = loaded_state();
+        state.action(Action::CleanWorktrees);
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Ok(gc_report(&["a-worktrees/K-1  pr=merged  1MB"])),
+        });
+        state.action(Action::Confirm);
+        state.action(Action::Close);
+        state.loading = false;
+        let effects = state.apply(Outcome::WorktreeGc {
+            apply: true,
+            result: Ok(GcReport {
+                summary: Some("1 worktrees removidas, 0 orfas podadas.".into()),
+                ..GcReport::default()
+            }),
+        });
+        assert!(effects.jobs.contains(&Job::Refresh));
+        assert_eq!(
+            state.notice.as_ref().map(|notice| notice.text.as_str()),
+            Some("1 worktrees removidas, 0 orfas podadas.")
+        );
+        assert_eq!(state.popup, None);
+    }
+
+    #[test]
+    fn stale_dry_run_results_do_not_reopen_a_closed_popup() {
+        let mut state = loaded_state();
+        state.action(Action::CleanWorktrees);
+        state.action(Action::Close);
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Ok(gc_report(&["a-worktrees/K-1  pr=merged  1MB"])),
+        });
+        assert_eq!(state.popup, None);
     }
 }

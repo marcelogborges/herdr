@@ -9,8 +9,9 @@ use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use super::adf::{self, RichLine, RichSpan, SpanStyle, WrappedSpan};
+use super::gc::GcReport;
 use super::model::{priority_icon, IssueDetail, StatusCategory};
-use super::state::{Action, DetailSection, Hit, JiraState, Popup, Row, View};
+use super::state::{Action, DetailSection, GcPhase, Hit, JiraState, Popup, Row, View};
 
 pub(crate) const BLUE: Color = Color::Rgb(0x2e, 0x7d, 0xe9);
 pub(crate) const PURPLE: Color = Color::Rgb(0x98, 0x54, 0xf1);
@@ -21,13 +22,14 @@ pub(crate) const RED: Color = Color::Rgb(0xd2, 0x0f, 0x39);
 pub(crate) const SELECT_BG: Color = Color::Rgb(0xdc, 0xe0, 0xe8);
 pub(crate) const BUTTON_BG: Color = Color::Rgb(0xe6, 0xe9, 0xef);
 
-const LIST_ACTIONS: [Action; 6] = [
+const LIST_ACTIONS: [Action; 7] = [
     Action::Move,
     Action::Comment,
     Action::AssignMe,
     Action::Browser,
     Action::Session,
     Action::Refresh,
+    Action::CleanWorktrees,
 ];
 const DETAIL_ACTIONS: [Action; 7] = [
     Action::Back,
@@ -112,6 +114,7 @@ pub(crate) fn render(frame: &mut Frame, state: &mut JiraState, now: Instant) {
             cursor,
             sending,
         }) => render_comment(frame, state, area, &key, &text, cursor, sending),
+        Some(Popup::WorktreeGc { phase, scroll }) => render_gc(frame, state, area, &phase, scroll),
         None => {}
     }
 }
@@ -889,6 +892,177 @@ fn render_comment(
     }
 }
 
+pub(crate) fn gc_lines(phase: &GcPhase) -> Vec<(String, Style)> {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(GRAY);
+    let mut lines = Vec::new();
+    let summary = |lines: &mut Vec<(String, Style)>, report: &GcReport| {
+        if let Some(summary) = &report.summary {
+            lines.push((summary.clone(), bold));
+        }
+    };
+    match phase {
+        GcPhase::Loading => lines.push(("rodando o limpador (dry-run)…".into(), dim)),
+        GcPhase::Preview(report) => {
+            summary(&mut lines, report);
+            lines.push((String::new(), Style::default()));
+            if report.has_work() {
+                if !report.removable.is_empty() {
+                    lines.push(("serão removidas:".into(), dim));
+                    lines.extend(
+                        report
+                            .removable
+                            .iter()
+                            .map(|row| (format!("  {row}"), Style::default().fg(RED))),
+                    );
+                }
+                if !report.orphans.is_empty() {
+                    lines.push(("órfãs a podar:".into(), dim));
+                    lines.extend(
+                        report
+                            .orphans
+                            .iter()
+                            .map(|row| (format!("  {row}"), Style::default().fg(ORANGE))),
+                    );
+                }
+            } else {
+                lines.push(("nada para remover".into(), dim));
+            }
+        }
+        GcPhase::Applying(_) => lines.push((
+            "removendo worktrees (--apply)…".into(),
+            Style::default().fg(ORANGE),
+        )),
+        GcPhase::Done(report) => {
+            summary(&mut lines, report);
+            lines.push((String::new(), Style::default()));
+            lines.extend(
+                report
+                    .lines
+                    .iter()
+                    .filter(|line| Some(*line) != report.summary.as_ref())
+                    .map(|line| (line.clone(), dim)),
+            );
+        }
+        GcPhase::Failed(error) => lines.push((error.clone(), Style::default().fg(RED))),
+    }
+    lines
+}
+
+pub(crate) fn gc_buttons(phase: &GcPhase) -> &'static [Action] {
+    match phase {
+        GcPhase::Preview(report) if report.has_work() => &[Action::Confirm, Action::Cancel],
+        GcPhase::Loading | GcPhase::Applying(_) => &[],
+        _ => &[Action::Close],
+    }
+}
+
+pub(crate) fn wrap_gc_lines(lines: Vec<(String, Style)>, width: usize) -> Vec<(String, Style)> {
+    let width = width.max(1);
+    let mut wrapped = Vec::new();
+    for (text, style) in lines {
+        if text.width() <= width {
+            wrapped.push((text, style));
+            continue;
+        }
+        let mut current = String::new();
+        for word in text.split(' ') {
+            let candidate = if current.is_empty() {
+                word.to_owned()
+            } else {
+                format!("{current} {word}")
+            };
+            if candidate.width() <= width {
+                current = candidate;
+                continue;
+            }
+            if !current.is_empty() {
+                wrapped.push((std::mem::take(&mut current), style));
+            }
+            let mut piece = String::new();
+            for ch in word.chars() {
+                if (piece.clone() + &ch.to_string()).width() > width {
+                    wrapped.push((std::mem::take(&mut piece), style));
+                }
+                piece.push(ch);
+            }
+            current = piece;
+        }
+        wrapped.push((current, style));
+    }
+    wrapped
+}
+
+fn render_gc(frame: &mut Frame, state: &mut JiraState, area: Rect, phase: &GcPhase, scroll: usize) {
+    let width = area.width.saturating_sub(4).min(96);
+    let lines = wrap_gc_lines(gc_lines(phase), width.saturating_sub(2) as usize);
+    let height = (lines.len() as u16).saturating_add(4);
+    let rect = popup_rect(area, width, height);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(PURPLE))
+            .title(Span::styled(
+                " limpar worktrees ",
+                Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+            )),
+        rect,
+    );
+    state.hits.push((rect, Hit::PopupArea));
+    let inner = Rect::new(
+        rect.x + 1,
+        rect.y + 1,
+        rect.width.saturating_sub(2),
+        rect.height.saturating_sub(3),
+    );
+    let visible = inner.height as usize;
+    let max_scroll = lines.len().saturating_sub(visible);
+    let first = scroll.min(max_scroll);
+    if let Some(Popup::WorktreeGc { scroll, .. }) = &mut state.popup {
+        *scroll = first;
+    }
+    for (offset, (text, style)) in lines.iter().skip(first).take(visible).enumerate() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(truncate(text, inner.width as usize), *style)),
+            Rect::new(inner.x, inner.y + offset as u16, inner.width, 1),
+        );
+    }
+    let bottom = rect.y + rect.height - 2;
+    let mut x = inner.x;
+    for action in gc_buttons(phase) {
+        let label = format!(" {} ", action.label());
+        let width = label.width() as u16;
+        let button = Rect::new(x, bottom, width.min(inner.width), 1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                label,
+                Style::default()
+                    .bg(BUTTON_BG)
+                    .fg(if *action == Action::Confirm {
+                        RED
+                    } else {
+                        GRAY
+                    })
+                    .add_modifier(Modifier::BOLD),
+            )),
+            button,
+        );
+        state.hits.push((button, Hit::Button(*action)));
+        x += width + 1;
+    }
+    if lines.len() > visible {
+        let hint = format!("{}/{} ↑↓", first + visible.min(lines.len()), lines.len());
+        let hint_width = hint.width() as u16;
+        if hint_width < inner.width {
+            frame.render_widget(
+                Paragraph::new(Span::styled(hint, Style::default().fg(GRAY))),
+                Rect::new(inner.x + inner.width - hint_width, bottom, hint_width, 1),
+            );
+        }
+    }
+}
+
 pub(crate) fn wrap_editor(
     text: &str,
     cursor: usize,
@@ -1325,5 +1499,121 @@ mod tests {
             Some(1_790_168_400)
         );
         assert_eq!(parse_jira_time("garbage"), None);
+    }
+
+    fn gc_preview(state: &mut JiraState, removable: &[&str]) {
+        state.apply(Outcome::WorktreeGc {
+            apply: false,
+            result: Ok(crate::cli::jira::gc::GcReport {
+                summary: Some(format!(
+                    "30 worktrees | {} removiveis (~1650MB) | 0 orfas | 29 mantidas",
+                    removable.len()
+                )),
+                removable: removable.iter().map(|row| (*row).to_owned()).collect(),
+                orphans: Vec::new(),
+                lines: Vec::new(),
+            }),
+        });
+    }
+
+    #[test]
+    fn clean_worktrees_button_opens_preview_and_confirm_applies() {
+        let mut state = loaded_state();
+        draw(&mut state, 100, 30);
+        let button = rect_of(&state, &Hit::Button(Action::CleanWorktrees));
+        assert_eq!(
+            click(&mut state, button.x + 1, button.y),
+            [Job::WorktreeGc { apply: false }]
+        );
+        let text = screen(&draw(&mut state, 100, 30));
+        assert!(text.contains("limpar worktrees"));
+        assert!(text.contains("rodando o limpador"));
+
+        gc_preview(
+            &mut state,
+            &["vakinha-web-worktrees/VK25-2811  pr=merged  1650MB"],
+        );
+        let text = screen(&draw(&mut state, 100, 30));
+        for expected in [
+            "30 worktrees | 1 removiveis (~1650MB) | 0 orfas | 29 mantidas",
+            "serão removidas:",
+            "vakinha-web-worktrees/VK25-2811  pr=merged  1650MB",
+            "enter confirmar",
+            "esc cancelar",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
+        let confirm = rect_of(&state, &Hit::Button(Action::Confirm));
+        assert_eq!(
+            click(&mut state, confirm.x + 1, confirm.y),
+            [Job::WorktreeGc { apply: true }]
+        );
+        let text = screen(&draw(&mut state, 100, 30));
+        assert!(text.contains("removendo worktrees"));
+        assert!(!text.contains("enter confirmar"));
+    }
+
+    #[test]
+    fn empty_preview_offers_only_close_and_cancel_click_never_applies() {
+        let mut state = loaded_state();
+        state.action(Action::CleanWorktrees);
+        gc_preview(&mut state, &[]);
+        let text = screen(&draw(&mut state, 100, 30));
+        assert!(text.contains("nada para remover"));
+        assert!(text.contains("esc fechar"));
+        assert!(!text.contains("enter confirmar"));
+        let close = rect_of(&state, &Hit::Button(Action::Close));
+        assert!(click(&mut state, close.x + 1, close.y).is_empty());
+        assert_eq!(state.popup, None);
+
+        state.action(Action::CleanWorktrees);
+        gc_preview(&mut state, &["a-worktrees/K-1  pr=merged  1MB"]);
+        draw(&mut state, 100, 30);
+        let cancel = rect_of(&state, &Hit::Button(Action::Cancel));
+        assert!(click(&mut state, cancel.x + 1, cancel.y).is_empty());
+        assert_eq!(state.popup, None);
+    }
+
+    #[test]
+    fn long_previews_scroll_inside_the_popup() {
+        let mut state = loaded_state();
+        state.action(Action::CleanWorktrees);
+        let rows = (0..40)
+            .map(|index| format!("repo-worktrees/K-{index}  pr=merged  1MB"))
+            .collect::<Vec<_>>();
+        let refs = rows.iter().map(String::as_str).collect::<Vec<_>>();
+        gc_preview(&mut state, &refs);
+        let first = screen(&draw(&mut state, 100, 20));
+        assert!(first.contains("K-0 "));
+        assert!(!first.contains("K-39"));
+        for _ in 0..60 {
+            state.key(press(KeyCode::Down));
+        }
+        let last = screen(&draw(&mut state, 100, 20));
+        assert!(last.contains("K-39"));
+        assert!(last.contains("enter confirmar"));
+    }
+
+    #[test]
+    fn gc_lines_wrap_to_the_popup_width() {
+        let wrapped = wrap_gc_lines(
+            vec![(
+                "30 worktrees | 0 removiveis (~0MB) | 0 orfas | 30 mantidas".to_owned(),
+                Style::default(),
+            )],
+            24,
+        );
+        assert!(wrapped.len() > 1);
+        assert!(wrapped.iter().all(|(line, _)| line.width() <= 24));
+        assert_eq!(
+            wrapped
+                .iter()
+                .map(|(line, _)| line.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            "30 worktrees | 0 removiveis (~0MB) | 0 orfas | 30 mantidas"
+        );
+        let long = wrap_gc_lines(vec![("x".repeat(30), Style::default())], 10);
+        assert_eq!(long.len(), 3);
     }
 }

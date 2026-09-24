@@ -246,6 +246,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # project = "ABC"
 # token_env = "JIRA_API_TOKEN"
 # refresh_seconds = 60
+# worktree_gc_command = "vk-wt gc"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)

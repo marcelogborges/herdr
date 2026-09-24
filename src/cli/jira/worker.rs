@@ -4,6 +4,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use crate::api::schema::ClaudeSessionInfo;
 
 use super::api::JiraApi;
+use super::gc::{self, GcReport};
 use super::herdr::{
     find_worktree, find_worktrees, session_in_worktree, worktree_info, HerdrBridge, LinkedSession,
     PaneContext,
@@ -33,6 +34,9 @@ pub(crate) enum Job {
     OpenWorktree {
         path: String,
         name: String,
+    },
+    WorktreeGc {
+        apply: bool,
     },
 }
 
@@ -71,6 +75,10 @@ pub(crate) enum Outcome {
         name: String,
     },
     CommentFailed(String),
+    WorktreeGc {
+        apply: bool,
+        result: Result<GcReport, String>,
+    },
     Notice(String),
     Failed(String),
 }
@@ -82,6 +90,7 @@ pub(crate) struct WorkerContext {
     pub owner_pane: Option<String>,
     pub worktree_roots: Vec<String>,
     pub browser_command: String,
+    pub worktree_gc_command: String,
 }
 
 pub(crate) fn run(context: WorkerContext, jobs: Receiver<Job>, outcomes: Sender<Outcome>) {
@@ -90,6 +99,26 @@ pub(crate) fn run(context: WorkerContext, jobs: Receiver<Job>, outcomes: Sender<
         myself: None,
     };
     while let Ok(job) = jobs.recv() {
+        if let Job::WorktreeGc { apply } = job {
+            let command = worker.context.worktree_gc_command.clone();
+            let gc_outcomes = outcomes.clone();
+            let spawned = std::thread::Builder::new()
+                .name("herdr-jira-gc".into())
+                .spawn(move || {
+                    let result = gc::run(&command, apply);
+                    let _ = gc_outcomes.send(Outcome::WorktreeGc { apply, result });
+                });
+            if let Err(err) = spawned {
+                let outcome = Outcome::WorktreeGc {
+                    apply,
+                    result: Err(format!("não foi possível iniciar o limpador: {err}")),
+                };
+                if outcomes.send(outcome).is_err() {
+                    break;
+                }
+            }
+            continue;
+        }
         let outcome = worker.handle(job);
         if outcomes.send(outcome).is_err() {
             break;
@@ -182,6 +211,10 @@ impl Worker {
             }
             Job::Session { key, link } => self.open_session(&key, link),
             Job::OpenWorktree { path, name } => self.open_worktree(&path, &name),
+            Job::WorktreeGc { apply } => Outcome::WorktreeGc {
+                apply,
+                result: gc::run(&self.context.worktree_gc_command, apply),
+            },
             Job::OpenUrl(url) => match open_url(&self.context.browser_command, &url) {
                 Ok(()) => Outcome::Notice(format!("abrindo {url}")),
                 Err(err) => Outcome::Failed(format!("não foi possível abrir o browser: {err}")),
@@ -333,6 +366,7 @@ pub(crate) mod tests {
                 owner_pane: Some("w1:p1".into()),
                 worktree_roots: Vec::new(),
                 browser_command: "true {url}".into(),
+                worktree_gc_command: "true".into(),
             },
             myself: None,
         }

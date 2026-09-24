@@ -971,6 +971,8 @@ pub struct JiraConfig {
     pub browser_command: String,
     /// Directories searched for `<repo>-worktrees/<KEY>*` checkouts.
     pub worktree_roots: Vec<String>,
+    /// Worktree cleaner run by the board's clean button; `--apply` is appended after confirmation. Default: "vk-wt gc".
+    pub worktree_gc_command: String,
     /// Seconds between automatic list refreshes; 0 disables it. Default: 60.
     pub refresh_seconds: u64,
     /// Field id holding the sprint. Default: "customfield_10020".
@@ -1010,6 +1012,7 @@ impl Default for JiraConfig {
                 .collect(),
             browser_command: "xdg-open {url}".to_owned(),
             worktree_roots: vec!["~/projects".to_owned()],
+            worktree_gc_command: "vk-wt gc".to_owned(),
             refresh_seconds: 60,
             sprint_field: "customfield_10020".to_owned(),
             story_points_field: "customfield_10016".to_owned(),

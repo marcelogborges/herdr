@@ -157,7 +157,9 @@ an issue when its task code or worktree name starts with the issue key. Use the
 keyboard or click: `m` moves the issue through a valid workflow transition, `c`
 comments, `a` assigns it to you, `o` opens it in the browser, `w` focuses its
 session (resuming a closed one in a new tab, or opening a tab in a matching
-`<repo>-worktrees/<KEY>` checkout under `worktree_roots`), and `r` refreshes.
+`<repo>-worktrees/<KEY>` checkout under `worktree_roots`), `r` refreshes, and
+`L` runs `worktree_gc_command` (default `vk-wt gc`) as a dry-run, lists the
+worktrees it would remove, and appends `--apply` only after you confirm.
 Enter or a double click opens the detail view with the description, comments,
 sprint, story points, and a live development summary. Two collapsible sections
 follow the fields: pull requests (status and a clickable link, toggled with `p`)

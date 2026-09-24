@@ -1,5 +1,6 @@
 pub(crate) mod adf;
 pub(crate) mod api;
+pub(crate) mod gc;
 pub(crate) mod herdr;
 pub(crate) mod model;
 pub(crate) mod state;
@@ -70,6 +71,7 @@ pub(crate) struct Setup {
     pub owner_pane: Option<String>,
     pub worktree_roots: Vec<String>,
     pub browser_command: String,
+    pub worktree_gc_command: String,
 }
 
 pub(crate) fn resolve_setup(
@@ -134,6 +136,7 @@ pub(crate) fn resolve_setup(
             .find_map(|name| env(name).filter(|value| !value.is_empty())),
         worktree_roots: config.worktree_roots.clone(),
         browser_command: config.browser_command.clone(),
+        worktree_gc_command: config.worktree_gc_command.clone(),
     })
 }
 
@@ -183,6 +186,7 @@ fn run_tui(terminal: &mut Tui, setup: Setup) -> io::Result<()> {
         owner_pane: setup.owner_pane.clone(),
         worktree_roots: setup.worktree_roots,
         browser_command: setup.browser_command,
+        worktree_gc_command: setup.worktree_gc_command,
     };
     std::thread::Builder::new()
         .name("herdr-jira-worker".into())
