@@ -42,6 +42,7 @@ pub(super) fn command() -> Command {
         .subcommand(tab_command())
         .subcommand(notification_command())
         .subcommand(right_panel_command())
+        .subcommand(jira_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
@@ -317,7 +318,7 @@ fn notification_command() -> Command {
 
 fn right_panel_command() -> Command {
     Command::new("right-panel")
-        .about("Control the right files/diff panel")
+        .about("Control the right files/diff/jira panel")
         .subcommand(
             Command::new("open")
                 .about("Open a file at a line in the right panel, or a directory in files mode")
@@ -325,6 +326,11 @@ fn right_panel_command() -> Command {
                 .arg(option("line", "N")),
         )
         .subcommand(Command::new("toggle").about("Show or hide the right panel"))
+}
+
+fn jira_command() -> Command {
+    Command::new("jira")
+        .about("Browse and update your Jira issues (runs in the right panel's jira tab)")
 }
 
 fn agent_command() -> Command {

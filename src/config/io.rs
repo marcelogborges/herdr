@@ -7,6 +7,7 @@ use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "advanced",
     "experimental",
+    "jira",
     "keys",
     "onboarding",
     "remote",
@@ -367,6 +368,14 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut diagnostics,
         &mut invalid_sections,
         |section| config.right_panel = section,
+    );
+    load_live_section(
+        table,
+        "jira",
+        "jira config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.jira = section,
     );
     load_live_section(
         table,

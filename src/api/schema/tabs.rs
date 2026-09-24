@@ -26,6 +26,19 @@ pub struct ClaudeSessionOpenParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClaudeSessionInfo {
+    pub session_id: String,
+    pub title: String,
+    pub cwd: String,
+    pub context: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
+    pub updated_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RightPanelShowParams {
     pub mode: crate::right_panel::RightPanelMode,
 }

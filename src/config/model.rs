@@ -332,6 +332,7 @@ pub struct Config {
     pub ui: UiConfig,
     pub worktrees: WorktreesConfig,
     pub right_panel: RightPanelConfig,
+    pub jira: JiraConfig,
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
@@ -932,6 +933,8 @@ pub struct RightPanelConfig {
     pub diff_command: String,
     /// Command `right_panel.open` runs for a file; {path}, {dir}, and {line} are substituted.
     pub open_command: String,
+    /// Command the right panel runs in jira mode. Default: `"$HERDR_BIN_PATH" jira`.
+    pub jira_command: String,
 }
 
 pub const DEFAULT_RIGHT_PANEL_OPEN_COMMAND: &str = "micro +{line} {path}; exec yazi {path}";
@@ -942,6 +945,75 @@ impl Default for RightPanelConfig {
             files_command: "yazi".to_owned(),
             diff_command: "lazygit".to_owned(),
             open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
+            jira_command: DEFAULT_RIGHT_PANEL_JIRA_COMMAND.to_owned(),
+        }
+    }
+}
+
+pub const DEFAULT_RIGHT_PANEL_JIRA_COMMAND: &str = "\"$HERDR_BIN_PATH\" jira";
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct JiraConfig {
+    /// Jira Cloud site URL, e.g. "https://example.atlassian.net".
+    pub site: String,
+    /// Atlassian account email used with the API token.
+    pub email: String,
+    /// Project key used by the default list query.
+    pub project: String,
+    /// Environment variable that holds the Atlassian API token. Default: "JIRA_API_TOKEN".
+    pub token_env: String,
+    /// JQL for the list. Empty uses the open issues assigned to you in `project`.
+    pub jql: String,
+    /// Status names in list order; statuses not listed follow by category.
+    pub status_order: Vec<String>,
+    /// Command that opens a URL; {url} is replaced with the shell-quoted URL. Default: "xdg-open {url}".
+    pub browser_command: String,
+    /// Directories searched for `<repo>-worktrees/<KEY>*` checkouts.
+    pub worktree_roots: Vec<String>,
+    /// Seconds between automatic list refreshes; 0 disables it. Default: 60.
+    pub refresh_seconds: u64,
+    /// Field id holding the sprint. Default: "customfield_10020".
+    pub sprint_field: String,
+    /// Field id holding the story point estimate. Default: "customfield_10016".
+    pub story_points_field: String,
+    /// Field id holding the development (pull request) summary. Default: "customfield_10000".
+    pub development_field: String,
+}
+
+pub const DEFAULT_JIRA_STATUS_ORDER: &[&str] = &[
+    "Development",
+    "Code Review",
+    "QA - Staging",
+    "Apps Staged Rollout",
+    "Waiting for dependencies",
+    "Waiting for priorization",
+    "Refinement",
+    "PRE-REFINEMENT",
+    "Design",
+    "Ready for Development",
+    "Ready for Design",
+    "Backlog",
+];
+
+impl Default for JiraConfig {
+    fn default() -> Self {
+        Self {
+            site: String::new(),
+            email: String::new(),
+            project: String::new(),
+            token_env: "JIRA_API_TOKEN".to_owned(),
+            jql: String::new(),
+            status_order: DEFAULT_JIRA_STATUS_ORDER
+                .iter()
+                .map(|status| (*status).to_owned())
+                .collect(),
+            browser_command: "xdg-open {url}".to_owned(),
+            worktree_roots: vec!["~/projects".to_owned()],
+            refresh_seconds: 60,
+            sprint_field: "customfield_10020".to_owned(),
+            story_points_field: "customfield_10016".to_owned(),
+            development_field: "customfield_10000".to_owned(),
         }
     }
 }

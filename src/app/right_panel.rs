@@ -7,7 +7,9 @@ use crate::app::state::AppState;
 use crate::app::App;
 use crate::layout::PaneId;
 use crate::pane::PaneLaunchEnv;
-use crate::right_panel::{self, RightPanelInstance, RightPanelMode, MAX_INSTANCES};
+use crate::right_panel::{
+    self, RightPanelInstance, RightPanelMode, MAX_INSTANCES, PANEL_OWNER_PANE_ENV,
+};
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 use crate::ui::TabSurfaceTarget;
 
@@ -335,8 +337,14 @@ impl App {
     ) -> std::io::Result<RightPanelInstance> {
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
-        let launch_env =
-            PaneLaunchEnv::from_extra(self.custom_command_env().0).without_pane_identity();
+        let mut extra_env = self.custom_command_env().0;
+        if let Some(owner_id) = self
+            .find_pane(owner)
+            .and_then(|(ws_idx, _)| self.public_pane_id(ws_idx, owner))
+        {
+            extra_env.push((PANEL_OWNER_PANE_ENV.to_owned(), owner_id));
+        }
+        let launch_env = PaneLaunchEnv::from_extra(extra_env).without_pane_identity();
         let runtime = TerminalRuntime::spawn_shell_command(
             pane_id,
             rows.max(1),

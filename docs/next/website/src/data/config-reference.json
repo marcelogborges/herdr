@@ -1484,6 +1484,90 @@
           "type": "string",
           "default": "\"micro +{line} {path}; exec yazi {path}\"",
           "description": "Command `herdr right-panel open` and `right_panel.open` run for a file, through /bin/sh -c in the file's directory. {path} and {dir} are replaced with shell-quoted paths and {line} with the line number (1 when none is given)."
+        },
+        {
+          "key": "right_panel.jira_command",
+          "type": "string",
+          "default": "\"\\\"$HERDR_BIN_PATH\\\" jira\"",
+          "description": "Command the right panel runs in jira mode, through /bin/sh -c. The default runs the interactive Jira board built into the running herdr binary; it receives HERDR_PANEL_OWNER_PANE_ID with the pane that owns the panel."
+        }
+      ]
+    },
+    {
+      "id": "jira",
+      "title": "Jira",
+      "keys": [
+        {
+          "key": "jira.site",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Jira Cloud site URL used by the jira panel tab, such as \"https://example.atlassian.net\". Required."
+        },
+        {
+          "key": "jira.email",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Atlassian account email paired with the API token. Required."
+        },
+        {
+          "key": "jira.project",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Project key for the default list query (open issues assigned to you). Required unless jql is set."
+        },
+        {
+          "key": "jira.token_env",
+          "type": "string",
+          "default": "\"JIRA_API_TOKEN\"",
+          "description": "Name of the environment variable holding the Atlassian API token. The token is read at runtime from the panel command's environment and never written to disk or logs."
+        },
+        {
+          "key": "jira.jql",
+          "type": "string",
+          "default": "\"\"",
+          "description": "JQL for the issue list. Empty uses project = <project> AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC."
+        },
+        {
+          "key": "jira.status_order",
+          "type": "array of strings",
+          "default": "[\"Development\", \"Code Review\", \"QA - Staging\", \"Apps Staged Rollout\", \"Waiting for dependencies\", \"Waiting for priorization\", \"Refinement\", \"PRE-REFINEMENT\", \"Design\", \"Ready for Development\", \"Ready for Design\", \"Backlog\"]",
+          "description": "Status group order in the list. Statuses not listed follow, in progress first, then to do, then done."
+        },
+        {
+          "key": "jira.browser_command",
+          "type": "string",
+          "default": "\"xdg-open {url}\"",
+          "description": "Command that opens issue and link URLs; {url} is replaced with the shell-quoted URL, or the URL is appended when the placeholder is missing."
+        },
+        {
+          "key": "jira.worktree_roots",
+          "type": "array of strings",
+          "default": "[\"~/projects\"]",
+          "description": "Directories searched for <repo>-worktrees/<KEY>* checkouts when the session action has no Claude session to focus or resume."
+        },
+        {
+          "key": "jira.refresh_seconds",
+          "type": "integer",
+          "default": "60",
+          "description": "Seconds between automatic list refreshes in the background; 0 disables automatic refresh."
+        },
+        {
+          "key": "jira.sprint_field",
+          "type": "string",
+          "default": "\"customfield_10020\"",
+          "description": "Field id that holds the sprint shown in the issue detail."
+        },
+        {
+          "key": "jira.story_points_field",
+          "type": "string",
+          "default": "\"customfield_10016\"",
+          "description": "Field id that holds the story point estimate shown in the issue detail."
+        },
+        {
+          "key": "jira.development_field",
+          "type": "string",
+          "default": "\"customfield_10000\"",
+          "description": "Field id that holds the development summary (pull requests, branches, commits) shown in the issue detail."
         }
       ]
     },

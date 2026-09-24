@@ -3960,7 +3960,8 @@
         "RightPanelMode": {
           "enum": [
             "files",
-            "diff"
+            "diff",
+            "jira"
           ],
           "type": "string"
         },
@@ -5407,6 +5408,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/ClaudeSessionOpenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "claude_session.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
             }
           },
           "required": [
@@ -7061,6 +7078,47 @@
             "unknown"
           ],
           "type": "string"
+        },
+        "ClaudeSessionInfo": {
+          "properties": {
+            "context": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "updated_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "worktree_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "session_id",
+            "title",
+            "cwd",
+            "context",
+            "updated_at_ms"
+          ],
+          "type": "object"
         },
         "ClientWindowTitleReason": {
           "enum": [
@@ -9720,6 +9778,25 @@
               "required": [
                 "type",
                 "tabs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "sessions": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/ClaudeSessionInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "claude_session_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "sessions"
               ],
               "type": "object"
             },

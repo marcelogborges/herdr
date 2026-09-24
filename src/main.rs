@@ -232,11 +232,20 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [worktrees]
 # directory = "~/.herdr/worktrees"
 
-# Right files/diff panel (prefix+i). Commands run in the focused agent's worktree.
+# Right files/diff/jira panel (prefix+i). Commands run in the focused agent's worktree.
 # [right_panel]
 # files_command = "yazi"
 # diff_command = "lazygit"
 # open_command = "micro +{line} {path}; exec yazi {path}"
+# jira_command = '"$HERDR_BIN_PATH" jira'
+
+# Jira board shown in the right panel's jira tab.
+# [jira]
+# site = "https://example.atlassian.net"
+# email = "you@example.com"
+# project = "ABC"
+# token_env = "JIRA_API_TOKEN"
+# refresh_seconds = 60
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)

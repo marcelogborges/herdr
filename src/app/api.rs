@@ -1081,6 +1081,7 @@ impl App {
             Method::ClaudeSessionOpen(params) => {
                 return self.handle_claude_session_open(request.id, params)
             }
+            Method::ClaudeSessionList(_) => return self.handle_claude_session_list(request.id),
             Method::RightPanelToggle(_) => return self.handle_right_panel_toggle(request.id),
             Method::RightPanelShow(params) => {
                 return self.handle_right_panel_show(request.id, params)
