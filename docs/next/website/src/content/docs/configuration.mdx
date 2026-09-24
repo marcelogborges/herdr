@@ -110,7 +110,33 @@ Grouped worktrees still behave like normal Herdr workspaces: they can be focused
 
 To delete a worktree checkout, use `Delete worktree checkout...` on a grouped child workspace. Herdr runs `git worktree remove`, first asking Git to remove safely. If Git refuses because the checkout has modified or untracked files, Herdr asks again before running the forced remove. Branches are not deleted.
 
-## Remote attach
+## Right panel
+
+`prefix+i` toggles a panel docked on the right edge with two tabs, `files` and
+`diff`. Each tab runs a real terminal command, so the panel works with any TUI
+file manager, editor, or Git client:
+
+```toml
+[ui]
+right_panel_width = "45%"
+
+[right_panel]
+files_command = "yazi"
+diff_command = "lazygit"
+open_command = "micro +{line} {path}; exec yazi {path}"
+```
+
+The panel belongs to each pane. Every pane has its own visibility, tab, and
+panel terminals, so focusing a pane that never opened the panel hides it, and
+returning to a pane restores its panel exactly as you left it. A pane's panel
+opens in the worktree its Claude Code session works in when Herdr can tell,
+and otherwise in the pane's directory. Clicking the panel focuses it; clicking
+a pane or pressing the prefix works as usual. Drag the panel's left edge to
+resize it; the width is shared by all panes, and double-clicking the edge
+returns to `right_panel_width`. The dragged width lasts until the server
+restarts. Quitting the panel command closes that terminal and hides that
+pane's panel, and closing a pane closes its panel terminals.
+
 
 Remote attach manages its SSH connection with temporary keepalives and, where supported, connection reuse by default.
 

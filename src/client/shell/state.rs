@@ -223,6 +223,11 @@ pub(super) enum ClientChromeDrag {
         source_workspace_id: String,
         target: Option<(Option<String>, u16)>,
     },
+    RightPanelWidth {
+        right_edge: u16,
+        last_sent_width: Option<u16>,
+        last_sent_at: Option<std::time::Instant>,
+    },
     PaneSplit {
         hit: PaneSplitHit,
         tab_id: String,
@@ -871,6 +876,7 @@ pub(crate) struct ClientShellState {
     pub(super) sidebar_section_split_manual: bool,
     pub(super) agent_panel_sort_manual: bool,
     pub(super) last_sidebar_divider_click: Option<std::time::Instant>,
+    pub(super) last_right_panel_divider_click: Option<std::time::Instant>,
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
     pub(super) tab_press: Option<ClientTabPress>,
@@ -1036,6 +1042,7 @@ impl ClientShellState {
             sidebar_section_split_manual: preferences.sidebar_section_split.is_some(),
             agent_panel_sort_manual: preferences.agent_panel_sort.is_some(),
             last_sidebar_divider_click: None,
+            last_right_panel_divider_click: None,
             chrome_drag: None,
             workspace_press: None,
             tab_press: None,

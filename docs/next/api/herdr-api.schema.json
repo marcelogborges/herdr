@@ -3957,6 +3957,63 @@
           ],
           "type": "object"
         },
+        "RightPanelMode": {
+          "enum": [
+            "files",
+            "diff"
+          ],
+          "type": "string"
+        },
+        "RightPanelOpenParams": {
+          "properties": {
+            "line": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "RightPanelSetWidthParams": {
+          "properties": {
+            "width": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "RightPanelShowParams": {
+          "properties": {
+            "mode": {
+              "$ref": "#/schemas/request/$defs/RightPanelMode"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
         "ServerLiveHandoffParams": {
           "properties": {
             "expected_protocol": {
@@ -5350,6 +5407,70 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/ClaudeSessionOpenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.toggle",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.show",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelShowParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelOpenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.set_width",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelSetWidthParams"
             }
           },
           "required": [

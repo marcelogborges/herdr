@@ -181,6 +181,10 @@ impl App {
 
         let mut worktree_restore_updates = Vec::new();
         if let AppEvent::PaneDied { pane_id, .. } = &ev {
+            if self.right_panel_pane_died(*pane_id) {
+                return Vec::new();
+            }
+            self.release_right_panel_owner(*pane_id);
             if self
                 .state
                 .popup_pane
@@ -1076,6 +1080,17 @@ impl App {
             Method::TabCreate(params) => return self.handle_tab_create(request.id, params),
             Method::ClaudeSessionOpen(params) => {
                 return self.handle_claude_session_open(request.id, params)
+            }
+            Method::RightPanelToggle(_) => return self.handle_right_panel_toggle(request.id),
+            Method::RightPanelShow(params) => {
+                return self.handle_right_panel_show(request.id, params)
+            }
+            Method::RightPanelOpen(params) => {
+                return self.handle_right_panel_open(request.id, params)
+            }
+            Method::RightPanelSetWidth(params) => {
+                self.set_right_panel_width(params.width);
+                return responses::encode_success(request.id, ResponseResult::Ok {});
             }
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),

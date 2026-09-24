@@ -138,6 +138,15 @@ herdr notification show <title> [--body TEXT] [--position top-left|top-right|bot
 
 `notification show` uses the configured `[ui.toast]` delivery. `--position` only affects in-app Herdr toasts. `--sound` defaults to `none`; `done` and `request` play the existing finished and needs-attention sounds only when the notification is shown.
 
+## Right panel
+
+```bash
+herdr right-panel open <PATH> [--line N]
+herdr right-panel toggle
+```
+
+The right panel belongs to each pane. `right-panel open` acts on the pane it runs in (`HERDR_PANE_ID`), or on the focused pane otherwise. It switches that pane's panel to files mode; for a file it replaces the pane's files terminal with `[right_panel] open_command` (default `micro +{line} {path}; exec yazi {path}`) run in the file's directory, and for a directory it shows the files view there. If that pane is focused the panel is shown and focused; otherwise it is prepared and appears when you focus the pane. Relative paths resolve against the current directory, and `PATH:LINE` works when `--line` is not given. `right-panel toggle` shows or hides the focused pane's panel.
+
 ## Sessions
 
 ```bash

@@ -21,6 +21,83 @@ impl ClientShellState {
         }
     }
 
+    fn right_panel_divider(&self) -> Option<Rect> {
+        self.hits
+            .panes
+            .iter()
+            .find(|hit| crate::right_panel::parse_public_id(&hit.pane_id).is_some())
+            .map(|hit| Rect::new(hit.rect.x, hit.rect.y, 1, hit.rect.height))
+    }
+
+    fn right_panel_width_from_column(right_edge: u16, column: u16) -> u16 {
+        right_edge.saturating_sub(column).max(1)
+    }
+
+    fn push_right_panel_width(&mut self, width: Option<u16>, outcome: &mut ClientShellInput) {
+        self.push_endpoint_method(
+            crate::api::schema::Method::RightPanelSetWidth(
+                crate::api::schema::RightPanelSetWidthParams { width },
+            ),
+            outcome,
+        );
+    }
+
+    fn start_right_panel_width_drag(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(divider) = self
+            .right_panel_divider()
+            .filter(|divider| super::contains(*divider, point))
+        else {
+            return false;
+        };
+        let now = std::time::Instant::now();
+        let double_click = self
+            .last_right_panel_divider_click
+            .is_some_and(|last| now.duration_since(last) <= std::time::Duration::from_millis(350));
+        self.last_right_panel_divider_click = Some(now);
+        if double_click {
+            self.push_right_panel_width(None, outcome);
+            return true;
+        }
+        let right_edge = self
+            .hits
+            .panes
+            .iter()
+            .find(|hit| crate::right_panel::parse_public_id(&hit.pane_id).is_some())
+            .map_or(divider.x, |hit| hit.rect.x.saturating_add(hit.rect.width));
+        self.chrome_drag = Some(ClientChromeDrag::RightPanelWidth {
+            right_edge,
+            last_sent_width: None,
+            last_sent_at: None,
+        });
+        true
+    }
+
+    fn drag_right_panel_width(&mut self, column: u16, outcome: &mut ClientShellInput) {
+        let Some(ClientChromeDrag::RightPanelWidth {
+            right_edge,
+            last_sent_width,
+            last_sent_at,
+        }) = self.chrome_drag.as_mut()
+        else {
+            return;
+        };
+        let width = Self::right_panel_width_from_column(*right_edge, column);
+        let now = std::time::Instant::now();
+        let should_send = *last_sent_width != Some(width)
+            && last_sent_at.is_none_or(|last| {
+                now.duration_since(last) >= std::time::Duration::from_millis(33)
+            });
+        if should_send {
+            *last_sent_width = Some(width);
+            *last_sent_at = Some(now);
+            self.push_right_panel_width(Some(width), outcome);
+        }
+    }
+
     fn set_sidebar_section_from_row(&mut self, row: u16, outcome: &mut ClientShellInput) {
         let divider = self.hits.sidebar_divider;
         if divider.height == 0 {
@@ -996,6 +1073,10 @@ impl ClientShellState {
                     self.set_sidebar_width_from_column(mouse.column, outcome);
                     return;
                 }
+                Some(ClientChromeDrag::RightPanelWidth { .. }) => {
+                    self.drag_right_panel_width(mouse.column, outcome);
+                    return;
+                }
                 Some(ClientChromeDrag::SidebarSection) => {
                     self.set_sidebar_section_from_row(mouse.row, outcome);
                     return;
@@ -1329,6 +1410,16 @@ impl ClientShellState {
                     }
                     ClientChromeDrag::SidebarWidth | ClientChromeDrag::SidebarSection => {
                         self.persist_chrome_preferences(outcome);
+                    }
+                    ClientChromeDrag::RightPanelWidth {
+                        right_edge,
+                        last_sent_width,
+                        ..
+                    } => {
+                        let width = Self::right_panel_width_from_column(right_edge, mouse.column);
+                        if last_sent_width != Some(width) {
+                            self.push_right_panel_width(Some(width), outcome);
+                        }
                     }
                     ClientChromeDrag::WorkspaceScrollbar { .. }
                     | ClientChromeDrag::AgentScrollbar { .. }
@@ -2147,6 +2238,12 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
+                if self.start_right_panel_width_drag(point, outcome) {
+                    return;
+                }
+                if self.handle_right_panel_header_click(point, outcome) {
+                    return;
+                }
                 let scrollbar_hit = self
                     .hits
                     .panes
@@ -2321,6 +2418,36 @@ impl ClientShellState {
             }
             _ => {}
         }
+    }
+
+    fn handle_right_panel_header_click(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(panel) = self
+            .hits
+            .panes
+            .iter()
+            .find(|hit| crate::right_panel::parse_public_id(&hit.pane_id).is_some())
+            .map(|hit| hit.rect)
+        else {
+            return false;
+        };
+        let Some((mode, _)) = crate::right_panel::header_tabs(panel)
+            .into_iter()
+            .find(|(_, rect)| super::contains(*rect, point))
+        else {
+            return false;
+        };
+        self.mode = ClientShellMode::Terminal;
+        self.push_endpoint_method(
+            crate::api::schema::Method::RightPanelShow(crate::api::schema::RightPanelShowParams {
+                mode,
+            }),
+            outcome,
+        );
+        true
     }
 
     fn pane_mouse_position(&self, hit: &PaneHit, mouse: MouseEvent) -> ClientMousePosition {

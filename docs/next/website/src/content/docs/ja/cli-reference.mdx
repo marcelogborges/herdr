@@ -134,6 +134,15 @@ herdr notification show <title> [--body TEXT] [--position top-left|top-right|bot
 
 `notification show` は設定済みの `[ui.toast]` 配信を使います。`--position` はアプリ内の Herdr トーストにのみ影響します。`--sound` のデフォルトは `none` で、`done` と `request` は通知が表示されたときにのみ、既存の完了音と要注意音を再生します。
 
+## 右パネル
+
+```bash
+herdr right-panel open <PATH> [--line N]
+herdr right-panel toggle
+```
+
+右パネルはペインごとに独立しています。`right-panel open` は実行されたペイン（`HERDR_PANE_ID`）、なければフォーカス中のペインに作用し、そのペインのパネルをファイルモードにします。ファイルの場合はそのペインのファイル端末を、ファイルのディレクトリで実行する `[right_panel] open_command`（既定値 `micro +{line} {path}; exec yazi {path}`）に置き換え、ディレクトリの場合はそこでファイル表示を開きます。そのペインがフォーカス中ならパネルを表示してフォーカスし、そうでなければ準備だけしてペインにフォーカスしたときに表示します。相対パスは現在のディレクトリを基準に解決され、`--line` がない場合は `PATH:LINE` も使えます。`right-panel toggle` はフォーカス中のペインのパネルを表示・非表示にします。
+
 ## セッション
 
 ```bash

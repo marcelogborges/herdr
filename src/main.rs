@@ -49,6 +49,7 @@ mod release_notes;
 mod remote;
 mod render_prof;
 mod render_signal;
+mod right_panel;
 mod selection;
 mod server;
 mod session;
@@ -191,6 +192,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_up = ""     # optional, e.g. "ctrl+shift+alt+up"
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
 # toggle_sidebar = "prefix+b"
+# toggle_right_panel = "prefix+i"
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
@@ -229,6 +231,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # [worktrees]
 # directory = "~/.herdr/worktrees"
+
+# Right files/diff panel (prefix+i). Commands run in the focused agent's worktree.
+# [right_panel]
+# files_command = "yazi"
+# diff_command = "lazygit"
+# open_command = "micro +{line} {path}; exec yazi {path}"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -331,6 +339,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Agent panel ordering: "spaces" (grouped by space) or "priority" (attention queue).
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
+
+# Right files/diff panel width in cells or a percentage.
+# right_panel_width = "45%"
 
 # Agent status indicators: "dots" preserves the compact color marks; "symbols" uses
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
@@ -618,6 +629,7 @@ fn main() -> io::Result<()> {
         println!("       herdr worktree <subcommand> ...");
         println!("       herdr tab <subcommand> ...");
         println!("       herdr notification <subcommand> ...");
+        println!("       herdr right-panel <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
         println!("       herdr session <subcommand> ...");
@@ -669,6 +681,10 @@ fn main() -> io::Result<()> {
             (
                 "herdr notification <subcommand>",
                 "Notification helpers over the socket API",
+            ),
+            (
+                "herdr right-panel <subcommand>",
+                "Open files in the right files/diff panel",
             ),
             (
                 "herdr agent <subcommand>",

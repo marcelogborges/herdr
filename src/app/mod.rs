@@ -13,12 +13,13 @@ mod api;
 pub(crate) use api::test_support::exiting_test_command;
 mod api_helpers;
 pub(crate) use api_helpers::limit_snapshot_lines;
-mod creation;
+pub(crate) mod creation;
 mod custom_commands;
 mod git_refresh;
 mod ids;
 pub(crate) mod pane_graphics;
 mod popup;
+mod right_panel;
 mod runtime;
 mod session;
 pub mod state;
@@ -532,6 +533,11 @@ impl App {
             installed_plugins: load_plugin_registry(policy.persist_plugin_registry),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
+            right_panel: {
+                let mut right_panel = crate::right_panel::RightPanelState::default();
+                right_panel.apply_config(config.ui.right_panel_width, &config.right_panel);
+                right_panel
+            },
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
@@ -873,7 +879,15 @@ impl App {
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
+                self.state.right_panel.width = config.ui.right_panel_width;
             }
+        }
+
+        if !invalid_section("right_panel") {
+            let width = self.state.right_panel.width;
+            self.state
+                .right_panel
+                .apply_config(width, &config.right_panel);
         }
 
         if !invalid_section("session")

@@ -133,10 +133,64 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
         };
+        self.blur_right_panel();
         self.state.switch_workspace_tab(ws_idx, tab_idx);
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
         encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
+    pub(super) fn handle_right_panel_toggle(&mut self, id: String) -> String {
+        self.toggle_right_panel();
+        encode_success(id, ResponseResult::Ok {})
+    }
+
+    pub(super) fn handle_right_panel_show(
+        &mut self,
+        id: String,
+        params: crate::api::schema::RightPanelShowParams,
+    ) -> String {
+        self.show_right_panel(params.mode);
+        encode_success(id, ResponseResult::Ok {})
+    }
+
+    pub(super) fn handle_right_panel_open(
+        &mut self,
+        id: String,
+        params: crate::api::schema::RightPanelOpenParams,
+    ) -> String {
+        let (owner, base) = match params.pane_id.as_deref() {
+            Some(pane_id) => {
+                let (Some((_, owner)), Some(cwd)) = (
+                    self.parse_pane_id(pane_id),
+                    self.pane_cwd_for_public_id(pane_id),
+                ) else {
+                    return encode_error(id, "pane_not_found", format!("pane {pane_id} not found"));
+                };
+                (Some(owner), cwd)
+            }
+            None => (None, std::env::current_dir().unwrap_or_else(|_| "/".into())),
+        };
+        match crate::right_panel::resolve_open_target(&params.path, params.line, &base) {
+            Ok(target) => {
+                if self.open_right_panel(&target, owner) {
+                    encode_success(id, ResponseResult::Ok {})
+                } else {
+                    encode_error(id, "pane_not_found", "no focused pane to open the panel in")
+                }
+            }
+            Err(message) => encode_error(id, "file_not_found", message),
+        }
+    }
+
+    fn pane_cwd_for_public_id(&self, pane_id: &str) -> Option<std::path::PathBuf> {
+        let (ws_idx, pane) = self.parse_pane_id(pane_id)?;
+        let workspace = self.state.workspaces.get(ws_idx)?;
+        let tab = workspace
+            .tabs
+            .get(workspace.find_tab_index_for_pane(pane)?)?;
+        tab.foreground_cwd_for_pane(pane, &self.terminal_runtimes)
+            .or_else(|| tab.cwd_for_pane(pane, &self.state.terminals, &self.terminal_runtimes))
     }
 
     pub(super) fn handle_tab_rename(&mut self, id: String, params: TabRenameParams) -> String {
@@ -605,6 +659,7 @@ mod tests {
                 title: "resume me".into(),
                 cwd: cwd.display().to_string(),
                 context: String::new(),
+                worktree_path: None,
                 updated_at_ms: 0,
             });
     }
@@ -635,6 +690,49 @@ mod tests {
             crate::worktree::canonical_or_original(&app.state.terminals[terminal_id].cwd),
             crate::worktree::canonical_or_original(&cwd)
         );
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn right_panel_open_resolves_against_the_calling_pane_and_reports_errors() {
+        let mut app = claude_session_test_app();
+        let pane_id = app.public_pane_id(0, app.state.workspaces[0].focused_pane_id().unwrap());
+        let open = |app: &mut App, path: &str, pane_id: Option<String>| {
+            app.handle_right_panel_open(
+                "req".into(),
+                crate::api::schema::RightPanelOpenParams {
+                    path: path.into(),
+                    line: None,
+                    pane_id,
+                },
+            )
+        };
+        let error_code = |response: &str| {
+            serde_json::from_str::<serde_json::Value>(response).unwrap()["error"]["code"]
+                .as_str()
+                .map(str::to_owned)
+        };
+
+        let response = open(&mut app, "definitely-missing-file.rs", pane_id.clone());
+        assert_eq!(error_code(&response).as_deref(), Some("file_not_found"));
+
+        let response = open(&mut app, "x", Some("w9:p9".into()));
+        assert_eq!(error_code(&response).as_deref(), Some("pane_not_found"));
+
+        let dir = std::env::temp_dir();
+        let response = open(&mut app, dir.to_str().unwrap(), None);
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::Ok {}));
+        let owner = app.state.workspaces[0].focused_pane_id().unwrap();
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert_eq!(
+            pane.pending_open,
+            Some(crate::right_panel::PendingOpen {
+                dir: dir.clone(),
+                command: None,
+            })
+        );
+        assert!(pane.visible && pane.focused);
         shutdown_test_runtimes(&mut app);
     }
 

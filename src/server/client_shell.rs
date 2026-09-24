@@ -40,6 +40,15 @@ pub(super) fn snapshot_with_completions(
     let focused_tab_id = location
         .and_then(|location| location.focused_tab_id().map(str::to_owned))
         .or_else(|| snapshot.focused_tab_id.clone());
+    let focused_panel_owner = focused_tab_id
+        .as_deref()
+        .and_then(|tab_id| app.parse_tab_id(tab_id))
+        .and_then(|(workspace_index, tab_index)| {
+            app.state.right_panel_owner(crate::ui::TabSurfaceTarget {
+                workspace_index,
+                tab_index,
+            })
+        });
     let focused_pane_id = focused_tab_id
         .as_deref()
         .and_then(|tab_id| app.parse_tab_id(tab_id))
@@ -277,7 +286,11 @@ pub(super) fn snapshot_with_completions(
         release_notes,
         focused_workspace_id,
         focused_tab_id,
-        focused_pane_id,
+        focused_pane_id: app
+            .state
+            .right_panel
+            .focused_public_id(focused_panel_owner)
+            .or(focused_pane_id),
         tab_bar_right,
         tab_bar_right_separator: app.state.tab_bar_right_separator.clone(),
         agent_view_label,
@@ -317,6 +330,21 @@ pub(super) fn render_pane_surface(
     graphics_delivery: &crate::kitty_graphics::surface::DeliveryCache,
     client_id: u64,
 ) -> Result<RenderedPaneSurface, SurfaceRenderDeferred> {
+    let panel_owner =
+        |app: &app::App| target.and_then(|target| app.state.right_panel_owner(target));
+    if let (Some(target), Some(panel)) = (
+        target,
+        app.state.right_panel.panel_rect(panel_owner(app), area),
+    ) {
+        app.sync_right_panel(target, panel);
+    }
+    let right_panel_owner = panel_owner(app);
+    let right_panel = right_panel_owner.and_then(|owner| {
+        app.state
+            .right_panel
+            .panel_rect(Some(owner), area)
+            .map(|panel| (owner, panel))
+    });
     let layout = crate::ui::compute_tab_surface_for(
         &app.state,
         &app.terminal_runtimes,
@@ -358,14 +386,18 @@ pub(super) fn render_pane_surface(
     } else {
         None
     };
-    let (buffer, cursor, hyperlinks, layout) =
+    let (mut buffer, mut cursor, hyperlinks, layout) =
         crate::server::render_stream::render_tab_surface_virtual(
             &app.state,
             &app.terminal_runtimes,
             layout,
             area,
         );
-    let panes = target
+    let right_panel_pane = right_panel.and_then(|(owner, panel)| {
+        render_right_panel(app, &mut buffer, &mut cursor, owner, panel, cell_size)
+    });
+    let right_panel_focused = right_panel_pane.as_ref().is_some_and(|pane| pane.focused);
+    let mut panes: Vec<protocol::PaneSurfacePane> = target
         .map(|target| {
             let workspace_index = target.workspace_index;
             layout
@@ -415,7 +447,7 @@ pub(super) fn render_pane_surface(
                                     viewport_rows: metrics.viewport_rows as u64,
                                 },
                             ),
-                            focused: pane.is_focused,
+                            focused: pane.is_focused && !right_panel_focused,
                             mouse_reporting,
                             sgr_pixel_mouse,
                             alternate_screen_active: runtime
@@ -428,6 +460,7 @@ pub(super) fn render_pane_surface(
                 .collect()
         })
         .unwrap_or_default();
+    panes.extend(right_panel_pane);
     let pane_frames = layout
         .pane_infos
         .iter()
@@ -514,6 +547,181 @@ pub(super) fn render_pane_surface(
         graphics,
         graphics_delivery: next_graphics_delivery,
     })
+}
+
+fn render_right_panel(
+    app: &app::App,
+    buffer: &mut ratatui::buffer::Buffer,
+    cursor: &mut Option<protocol::CursorState>,
+    owner: crate::layout::PaneId,
+    panel: Rect,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) -> Option<protocol::PaneSurfacePane> {
+    use ratatui::style::{Modifier, Style};
+
+    let state = &app.state.right_panel;
+    let pane_state = state.pane(owner)?;
+    let instance = state.displayed(owner)?;
+    let runtime = app.terminal_runtimes.get(&instance.terminal_id)?;
+    let panel = panel.intersection(buffer.area);
+    let content = crate::right_panel::content_rect(panel);
+    if content.width == 0 || content.height == 0 {
+        return None;
+    }
+    resize_right_panel_terminal(app, instance, runtime, content, cell_size);
+    let (panel_buffer, panel_cursor) = crate::server::render_stream::render_terminal_virtual(
+        runtime,
+        Rect::new(0, 0, content.width, content.height),
+    );
+    for y in 0..content.height {
+        for x in 0..content.width {
+            buffer[(content.x + x, content.y + y)] = panel_buffer[(x, y)].clone();
+        }
+    }
+
+    let palette = &app.state.palette;
+    let focused = pane_state.focused;
+    let edge = Style::default().fg(if focused {
+        palette.accent
+    } else {
+        palette.overlay0
+    });
+    for y in panel.y..panel.y + panel.height {
+        let cell = &mut buffer[(panel.x, y)];
+        cell.reset();
+        cell.set_symbol("│");
+        cell.set_style(edge);
+    }
+    let header = Style::default().bg(palette.panel_bg).fg(palette.overlay0);
+    for x in panel.x + 1..panel.x + panel.width {
+        let cell = &mut buffer[(x, panel.y)];
+        cell.reset();
+        cell.set_symbol(" ");
+        cell.set_style(header);
+    }
+    let tabs = crate::right_panel::header_tabs(panel);
+    for (mode, rect) in &tabs {
+        let style = if *mode == pane_state.mode {
+            header
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            header.fg(palette.subtext0)
+        };
+        buffer.set_string(rect.x, rect.y, format!(" {} ", mode.label()), style);
+    }
+    let label_x = tabs
+        .last()
+        .map_or(panel.x + 2, |(_, rect)| rect.x + rect.width + 2);
+    let right = panel.x + panel.width;
+    if label_x < right {
+        let dir = instance
+            .dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let visible: String = dir.chars().take(usize::from(right - label_x)).collect();
+        buffer.set_string(label_x, panel.y, visible, header.fg(palette.overlay1));
+    }
+
+    if instance.exited {
+        let notice = format!(
+            " {} exited · click files/diff or prefix+i to close ",
+            state.command(instance.mode)
+        );
+        let row = content.y + content.height - 1;
+        let style = Style::default().bg(palette.red).fg(palette.panel_bg);
+        for x in content.x..content.x + content.width {
+            let cell = &mut buffer[(x, row)];
+            cell.reset();
+            cell.set_symbol(" ");
+            cell.set_style(style);
+        }
+        let visible: String = notice.chars().take(usize::from(content.width)).collect();
+        buffer.set_string(content.x, row, visible, style);
+    }
+
+    if focused && !instance.exited {
+        *cursor = panel_cursor.map(|mut panel_cursor| {
+            panel_cursor.x = panel_cursor.x.saturating_add(content.x);
+            panel_cursor.y = panel_cursor.y.saturating_add(content.y);
+            panel_cursor
+        });
+    }
+    let (pixel_width, pixel_height) = if cell_size.is_known() {
+        (
+            u32::from(content.width) * cell_size.width_px,
+            u32::from(content.height) * cell_size.height_px,
+        )
+    } else {
+        (0, 0)
+    };
+    Some(protocol::PaneSurfacePane {
+        pane_id: crate::right_panel::public_id(&instance.terminal_id),
+        content_revision: runtime.content_seq() | 1,
+        rect: panel.into(),
+        inner_rect: content.into(),
+        scrollbar_rect: None,
+        scroll: runtime
+            .scroll_metrics()
+            .map(|metrics| protocol::PaneSurfaceScrollMetrics {
+                offset_from_bottom: metrics.offset_from_bottom as u64,
+                max_offset_from_bottom: metrics.max_offset_from_bottom as u64,
+                viewport_rows: metrics.viewport_rows as u64,
+            }),
+        focused,
+        mouse_reporting: runtime.mouse_reporting_enabled(),
+        sgr_pixel_mouse: runtime.sgr_pixel_mouse_enabled(),
+        alternate_screen_active: runtime.alternate_screen_active(),
+        pixel_width,
+        pixel_height,
+    })
+}
+
+fn resize_right_panel_terminal(
+    app: &app::App,
+    instance: &crate::right_panel::RightPanelInstance,
+    runtime: &crate::terminal::TerminalRuntime,
+    content: Rect,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) {
+    if runtime.current_size() != (content.height, content.width)
+        && !app
+            .state
+            .direct_attach_resize_locks
+            .contains(&instance.terminal_id)
+    {
+        runtime.resize(
+            content.height,
+            content.width,
+            cell_size.width_px,
+            cell_size.height_px,
+        );
+    }
+}
+
+pub(super) fn resize_right_panel_runtime(
+    app: &app::App,
+    target: crate::ui::TabSurfaceTarget,
+    area: Rect,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) {
+    let Some(owner) = app.state.right_panel_owner(target) else {
+        return;
+    };
+    let Some(panel) = app.state.right_panel.panel_rect(Some(owner), area) else {
+        return;
+    };
+    let Some(instance) = app.state.right_panel.displayed(owner) else {
+        return;
+    };
+    let Some(runtime) = app.terminal_runtimes.get(&instance.terminal_id) else {
+        return;
+    };
+    let content = crate::right_panel::content_rect(panel);
+    if content.width > 0 && content.height > 0 {
+        resize_right_panel_terminal(app, instance, runtime, content, cell_size);
+    }
 }
 
 fn render_popup_surface(

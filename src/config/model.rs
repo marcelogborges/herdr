@@ -331,6 +331,7 @@ pub struct Config {
     pub keys: KeysConfig,
     pub ui: UiConfig,
     pub worktrees: WorktreesConfig,
+    pub right_panel: RightPanelConfig,
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
@@ -465,6 +466,8 @@ pub struct KeysConfig {
     pub resize_pane_right: BindingConfig,
     /// Toggle sidebar collapse. Default: "prefix+b"
     pub toggle_sidebar: BindingConfig,
+    /// Toggle the right files/diff panel. Default: "prefix+i"
+    pub toggle_right_panel: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
     pub indexed: IndexedKeysConfig,
     /// Prefix-mode custom command bindings.
@@ -597,6 +600,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     toggle_sidebar: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_right_panel: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
@@ -685,6 +690,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(resize_pane_up);
         apply_field!(resize_pane_right);
         apply_field!(toggle_sidebar);
+        apply_field!(toggle_right_panel);
         apply_field!(indexed);
         apply_field!(command);
 
@@ -790,6 +796,7 @@ impl KeysConfig {
         copy_effective_action_field!(resize_pane_up, keybinds.resize_pane_up);
         copy_effective_action_field!(resize_pane_right, keybinds.resize_pane_right);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
+        copy_effective_action_field!(toggle_right_panel, keybinds.toggle_right_panel);
         copy_user_field!(indexed);
 
         profile
@@ -916,6 +923,29 @@ impl<'de> Deserialize<'de> for PaneBordersConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RightPanelConfig {
+    /// Command the right panel runs in files mode. Default: "yazi".
+    pub files_command: String,
+    /// Command the right panel runs in diff mode. Default: "lazygit".
+    pub diff_command: String,
+    /// Command `right_panel.open` runs for a file; {path}, {dir}, and {line} are substituted.
+    pub open_command: String,
+}
+
+pub const DEFAULT_RIGHT_PANEL_OPEN_COMMAND: &str = "micro +{line} {path}; exec yazi {path}";
+
+impl Default for RightPanelConfig {
+    fn default() -> Self {
+        Self {
+            files_command: "yazi".to_owned(),
+            diff_command: "lazygit".to_owned(),
+            open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -975,6 +1005,8 @@ pub struct UiConfig {
     pub window_title: String,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
+    /// Right panel width in cells or a percentage like "45%". Default: "45%".
+    pub right_panel_width: crate::popup_size::PopupSize,
     /// Retired setting that Herdr wrote before the workspace filter was removed.
     #[serde(rename = "agent_panel_scope")]
     _legacy_agent_panel_scope: Option<LegacyAgentPanelScopeConfig>,
@@ -1159,6 +1191,7 @@ impl Default for KeysConfig {
             resize_pane_up: BindingConfig::empty(),
             resize_pane_right: BindingConfig::empty(),
             toggle_sidebar: BindingConfig::one("prefix+b"),
+            toggle_right_panel: BindingConfig::one("prefix+i"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
             user_fields: BTreeSet::new(),
@@ -1203,6 +1236,7 @@ impl Default for UiConfig {
             tab_bar_right_separator: " ".into(),
             window_title: super::window_title::default_window_title(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
+            right_panel_width: crate::right_panel::default_width(),
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
