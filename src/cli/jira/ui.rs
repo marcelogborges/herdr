@@ -436,29 +436,48 @@ pub(crate) fn detail_lines(
             .map(|(key, summary)| format!("{key} {summary}")),
     );
     field("desenvolvimento", detail.development.clone());
+    if !detail.pull_requests.is_empty() {
+        lines.push(RichLine::plain("pull requests:", dim));
+    }
+    let status_width = detail
+        .pull_requests
+        .iter()
+        .map(|pull_request| pull_request.status.chars().count())
+        .max()
+        .unwrap_or(0);
     for pull_request in &detail.pull_requests {
-        let mut spans = vec![span("  ", dim)];
-        if !pull_request.status.is_empty() {
-            spans.push(span(
-                &format!("{} ", pull_request.status.to_lowercase()),
-                dim,
-            ));
-        }
-        spans.push(RichSpan {
-            text: pull_request.label(),
-            style: SpanStyle {
-                underline: true,
-                ..SpanStyle::default()
-            },
-            link: Some(pull_request.url.clone()),
-        });
-        if !pull_request.title.is_empty() {
-            spans.push(span(&format!(" {}", pull_request.title), dim));
-        }
+        let status = pull_request.status.to_lowercase();
+        let declined = matches!(status.as_str(), "declined" | "closed");
+        let status_style = SpanStyle {
+            bold: status == "open",
+            dim: status != "open",
+            ..SpanStyle::default()
+        };
         lines.push(RichLine {
-            spans,
+            indent: 2,
+            spans: vec![
+                span(&format!("{status:<status_width$}  "), status_style),
+                RichSpan {
+                    text: pull_request.label(),
+                    style: SpanStyle {
+                        underline: true,
+                        strike: declined,
+                        dim: declined,
+                        ..SpanStyle::default()
+                    },
+                    link: Some(pull_request.url.clone()),
+                },
+            ],
             ..RichLine::default()
         });
+        let title = pull_request.title.trim();
+        if !title.is_empty() && !title.starts_with(&issue.key) {
+            lines.push(RichLine {
+                indent: 4 + status_width,
+                spans: vec![span(title, dim)],
+                ..RichLine::default()
+            });
+        }
     }
     let url = format!("{browse_base}{}", issue.key);
     lines.push(RichLine {
@@ -1038,7 +1057,8 @@ mod tests {
 
         for expected in [
             "VK25-3 · Task · Code Review",
-            "open vakinha/vakinha-web#5783 VK25-3: tela nova",
+            "pull requests:",
+            "open  vakinha/vakinha-web#5783",
             "sprint: Sprint 9",
             "pontos: 2",
             "desenvolvimento: 1 PR (open)",
