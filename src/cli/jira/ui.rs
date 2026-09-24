@@ -514,7 +514,6 @@ pub(crate) fn detail_lines(
             .as_ref()
             .map(|(key, summary)| format!("{key} {summary}")),
     );
-    field("desenvolvimento", detail.development.clone());
     let status_width = detail
         .pull_requests
         .iter()
@@ -1196,6 +1195,11 @@ mod tests {
             ],
         };
         state.apply(Outcome::Detail(Box::new(detail)));
+        let collapsed = screen(&draw(&mut state, 70, 40));
+        assert!(collapsed.contains("▸ pull requests (1)"));
+        assert!(collapsed.contains("▸ worktrees (2)"));
+        assert!(!collapsed.contains("desenvolvimento"));
+        state.collapsed_sections.clear();
         let terminal = draw(&mut state, 70, 40);
         let text = screen(&terminal);
 
@@ -1209,7 +1213,6 @@ mod tests {
             "task/VK25-3/tela",
             "sprint: Sprint 9",
             "pontos: 2",
-            "desenvolvimento: 1 PR (open)",
             "Descrição",
             "Comentários (1)",
             "Ana · 2020-01-01",

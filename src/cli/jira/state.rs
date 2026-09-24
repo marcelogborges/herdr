@@ -161,7 +161,10 @@ impl JiraState {
             rows: Vec::new(),
             collapsed: HashSet::new(),
             seen_groups: HashSet::new(),
-            collapsed_sections: HashSet::new(),
+            collapsed_sections: HashSet::from([
+                DetailSection::PullRequests,
+                DetailSection::Worktrees,
+            ]),
             selection: None,
             scroll: 0,
             links: HashMap::new(),
