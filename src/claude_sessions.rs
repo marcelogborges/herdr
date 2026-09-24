@@ -11,6 +11,9 @@ pub(crate) const MAX_CLAUDE_SESSIONS: usize = 30;
 pub(crate) const CLAUDE_SESSION_SCAN_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_TITLE_CHARS: usize = 120;
 const READ_CHUNK_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_SESSION_REPOS: usize = 20;
+const MAX_COMMAND_PATHS: usize = 16;
+const MAX_REPO_CACHE: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ClaudeSession {
@@ -19,6 +22,7 @@ pub(crate) struct ClaudeSession {
     pub cwd: String,
     pub context: String,
     pub worktree_path: Option<String>,
+    pub repos: Vec<String>,
     pub updated_at_ms: u64,
 }
 
@@ -35,6 +39,7 @@ struct TranscriptState {
     first_prompt: Option<String>,
     tool_worktree: Option<String>,
     tool_worktree_path: Option<String>,
+    repos: Vec<String>,
 }
 
 impl TranscriptState {
@@ -45,7 +50,17 @@ impl TranscriptState {
             .or(self.first_prompt.as_deref())
     }
 
-    fn apply_line(&mut self, line: &[u8]) {
+    fn touch_repo(&mut self, resolver: &mut RepoResolver, path: &Path) {
+        let Some(root) = resolver.resolve(path) else {
+            return;
+        };
+        let root = root.to_string_lossy().into_owned();
+        self.repos.retain(|repo| *repo != root);
+        self.repos.insert(0, root);
+        self.repos.truncate(MAX_SESSION_REPOS);
+    }
+
+    fn apply_line(&mut self, line: &[u8], resolver: &mut RepoResolver) {
         let Ok(value) = serde_json::from_slice::<Value>(line) else {
             return;
         };
@@ -55,7 +70,10 @@ impl TranscriptState {
             }
         }
         if let Some(cwd) = non_empty_str(&value, "cwd") {
-            self.cwd = Some(cwd.to_owned());
+            if self.cwd.as_deref() != Some(cwd) {
+                self.cwd = Some(cwd.to_owned());
+                self.touch_repo(resolver, Path::new(cwd));
+            }
         }
         match value.get("type").and_then(Value::as_str) {
             Some("custom-title") => {
@@ -78,6 +96,10 @@ impl TranscriptState {
                 if let Some(path) = last_tool_value(&value, crate::right_panel::worktree_path) {
                     self.tool_worktree_path = Some(path);
                 }
+                let base = self.cwd.clone().map(PathBuf::from);
+                for path in tool_paths(&value, base.as_deref()) {
+                    self.touch_repo(resolver, &path);
+                }
             }
             _ => {}
         }
@@ -88,6 +110,7 @@ impl TranscriptState {
 pub(crate) struct ClaudeSessionScanner {
     projects_dir: PathBuf,
     transcripts: HashMap<PathBuf, TranscriptState>,
+    resolver: RepoResolver,
 }
 
 impl ClaudeSessionScanner {
@@ -95,10 +118,12 @@ impl ClaudeSessionScanner {
         Self {
             projects_dir: claude_dir.join("projects"),
             transcripts: HashMap::new(),
+            resolver: RepoResolver::default(),
         }
     }
 
     pub(crate) fn scan(&mut self) -> Vec<ClaudeSession> {
+        self.resolver.clear();
         let mut candidates = transcript_files(&self.projects_dir);
         candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.1));
         let mut sessions = Vec::new();
@@ -112,7 +137,7 @@ impl ClaudeSessionScanner {
                 if len < state.offset {
                     state = TranscriptState::default();
                 }
-                if read_transcript(&path, &mut state).is_err() {
+                if read_transcript(&path, &mut state, &mut self.resolver).is_err() {
                     continue;
                 }
                 state.modified = Some(modified);
@@ -191,7 +216,11 @@ fn transcript_files(projects_dir: &Path) -> Vec<(PathBuf, SystemTime, u64)> {
     files
 }
 
-fn read_transcript(path: &Path, state: &mut TranscriptState) -> io::Result<()> {
+fn read_transcript(
+    path: &Path,
+    state: &mut TranscriptState,
+    resolver: &mut RepoResolver,
+) -> io::Result<()> {
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(state.offset))?;
     let mut pending = Vec::new();
@@ -207,7 +236,7 @@ fn read_transcript(path: &Path, state: &mut TranscriptState) -> io::Result<()> {
         };
         for line in pending[..last_newline].split(|byte| *byte == b'\n') {
             if !line.is_empty() {
-                state.apply_line(line);
+                state.apply_line(line, resolver);
             }
         }
         state.offset += (last_newline + 1) as u64;
@@ -242,6 +271,7 @@ fn session_from_state(
         cwd,
         context,
         worktree_path,
+        repos: state.repos.clone(),
         updated_at_ms: modified
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
@@ -291,6 +321,149 @@ fn last_tool_value(value: &Value, extract: fn(&str) -> Option<String>) -> Option
         })
         .filter_map(extract)
         .next_back()
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct RepoResolver {
+    cache: HashMap<PathBuf, Option<PathBuf>>,
+}
+
+impl RepoResolver {
+    pub(crate) fn clear(&mut self) {
+        self.cache.clear();
+    }
+
+    pub(crate) fn resolve(&mut self, path: &Path) -> Option<PathBuf> {
+        let path = normalize(path)?;
+        let start = path.ancestors().find(|ancestor| ancestor.is_dir())?;
+        let mut visited = Vec::new();
+        let mut found = None;
+        for dir in start.ancestors() {
+            if let Some(cached) = self.cache.get(dir) {
+                found = cached.clone();
+                break;
+            }
+            visited.push(dir.to_path_buf());
+            if is_repo_root(dir) {
+                found = Some(dir.to_path_buf());
+                break;
+            }
+        }
+        if self.cache.len() + visited.len() > MAX_REPO_CACHE {
+            self.cache.clear();
+        }
+        for dir in visited {
+            self.cache.insert(dir, found.clone());
+        }
+        found
+    }
+}
+
+pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
+    RepoResolver::default().resolve(path)
+}
+
+pub(crate) fn is_repo_root(dir: &Path) -> bool {
+    if dir.parent().is_none() {
+        return false;
+    }
+    let dot_git = dir.join(".git");
+    if dot_git.is_dir() {
+        return dot_git.join("HEAD").is_file();
+    }
+    std::fs::read_to_string(&dot_git).is_ok_and(|text| text.trim_start().starts_with("gitdir:"))
+}
+
+fn normalize(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => normalized.push(other),
+        }
+    }
+    Some(normalized)
+}
+
+fn tool_paths(value: &Value, cwd: Option<&Path>) -> Vec<PathBuf> {
+    let Some(blocks) = value
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let absolute = |text: &str| -> Option<PathBuf> {
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let path = expand_tilde(text);
+        if path.is_absolute() {
+            Some(path)
+        } else {
+            cwd.map(|cwd| cwd.join(path))
+        }
+    };
+    let mut paths = Vec::new();
+    for input in blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .filter_map(|block| block.get("input"))
+    {
+        for key in ["file_path", "path", "notebook_path"] {
+            if let Some(path) = input.get(key).and_then(Value::as_str).and_then(absolute) {
+                paths.push(path);
+            }
+        }
+        if let Some(command) = input.get("command").and_then(Value::as_str) {
+            paths.extend(command_paths(command, cwd));
+        }
+    }
+    paths
+}
+
+fn expand_tilde(text: &str) -> PathBuf {
+    match text.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join(rest))
+            .unwrap_or_else(|| PathBuf::from(text)),
+        None => PathBuf::from(text),
+    }
+}
+
+pub(crate) fn command_paths(command: &str, cwd: Option<&Path>) -> Vec<PathBuf> {
+    let tokens: Vec<&str> = command
+        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')' | '`'))
+        .map(|token| token.trim_matches(|c| matches!(c, '"' | '\'' | '<' | '>')))
+        .filter(|token| !token.is_empty())
+        .collect();
+    let mut paths = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if paths.len() >= MAX_COMMAND_PATHS {
+            break;
+        }
+        let value = if token.starts_with(['/', '~']) {
+            *token
+        } else {
+            token.split_once('=').map_or(*token, |(_, value)| value)
+        };
+        let after_dir_flag = index > 0 && matches!(tokens[index - 1], "cd" | "pushd" | "-C");
+        if value.starts_with('/') || value.starts_with("~/") {
+            paths.push(expand_tilde(value));
+        } else if after_dir_flag && !value.starts_with('-') && !value.starts_with('$') {
+            if let Some(cwd) = cwd {
+                paths.push(cwd.join(value));
+            }
+        }
+    }
+    paths
 }
 
 fn task_code(text: &str) -> Option<String> {
@@ -593,6 +766,116 @@ mod tests {
                 None
             ]
         );
+    }
+
+    fn fake_repo(root: &Path, relative: &str) -> PathBuf {
+        let repo = root.join(relative);
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        repo
+    }
+
+    #[test]
+    fn repo_root_accepts_git_dirs_and_worktree_files_but_not_bare_dot_git_folders() {
+        let dir = TestDir::new();
+        let api = fake_repo(dir.path(), "ws/api");
+        std::fs::create_dir_all(api.join("src/deep")).unwrap();
+        let worktree = dir.path().join("ws/api-worktrees/VK-1");
+        std::fs::create_dir_all(worktree.join("lib")).unwrap();
+        std::fs::write(worktree.join(".git"), "gitdir: /x/.git/worktrees/VK-1\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("ws/.git/info")).unwrap();
+
+        assert_eq!(repo_root(&api.join("src/deep/missing.rs")), Some(api.clone()));
+        assert_eq!(repo_root(&api.join("src/../src/deep")), Some(api.clone()));
+        assert_eq!(repo_root(&worktree.join("lib/new/file.rb")), Some(worktree));
+        assert_eq!(repo_root(&dir.path().join("ws/notes")), None);
+        assert_eq!(repo_root(Path::new("relative/path")), None);
+
+        let mut resolver = RepoResolver::default();
+        assert_eq!(resolver.resolve(&api.join("src")), Some(api.clone()));
+        assert_eq!(resolver.cache.get(&api.join("src")), Some(&Some(api.clone())));
+        assert_eq!(resolver.resolve(&api.join("src/deep")), Some(api));
+    }
+
+    #[test]
+    fn command_paths_take_absolute_tokens_and_relative_cd_targets() {
+        let cwd = Path::new("/w");
+        assert_eq!(
+            command_paths(
+                "cd vakinha-api && git -C \"/w/web-worktrees/VK-2\" status; ls --dir=/opt/x ~/y $HOME/z",
+                Some(cwd)
+            ),
+            [
+                PathBuf::from("/w/vakinha-api"),
+                PathBuf::from("/w/web-worktrees/VK-2"),
+                PathBuf::from("/opt/x"),
+                expand_tilde("~/y"),
+            ]
+        );
+        assert!(command_paths("cd -", Some(cwd)).is_empty());
+        assert!(command_paths("cd api", None).is_empty());
+    }
+
+    #[test]
+    fn sessions_accumulate_touched_repos_most_recent_first() {
+        let dir = TestDir::new();
+        let ws = dir.path().join("ws");
+        let api = fake_repo(&ws, "api");
+        let web = fake_repo(&ws, "web");
+        let engine = fake_repo(&ws, "engine");
+        let ws_text = ws.display().to_string();
+        let tool = |input: String| {
+            format!(
+                r#"{{"type":"assistant","sessionId":"a","cwd":"{ws_text}","message":{{"content":[{{"type":"tool_use","input":{input}}}]}}}}"#
+            )
+        };
+        let lines = [
+            format!(
+                r#"{{"type":"user","sessionId":"a","cwd":"{ws_text}","message":{{"role":"user","content":"hi"}}}}"#
+            ),
+            tool(format!(r#"{{"file_path":"{}/src/a.rs"}}"#, api.display())),
+            tool(r#"{"command":"cd web && git status"}"#.to_owned()),
+            tool(format!(r#"{{"path":"{}"}}"#, engine.display())),
+            tool(r#"{"command":"cat /definitely/not/a/repo"}"#.to_owned()),
+            tool(format!(r#"{{"file_path":"{}/Gemfile"}}"#, api.display())),
+            format!(
+                r#"{{"type":"user","sessionId":"a","cwd":"{}","message":{{"role":"user","content":"x"}}}}"#,
+                web.join("src").display()
+            ),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        write_transcript(dir.path(), "p", "a", &lines);
+
+        let sessions = ClaudeSessionScanner::new(dir.path()).scan();
+
+        let expected: Vec<String> = [&web, &api, &engine]
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        assert_eq!(sessions[0].repos, expected);
+    }
+
+    #[test]
+    fn session_repos_are_capped() {
+        let dir = TestDir::new();
+        let ws = dir.path().join("ws");
+        let lines: Vec<String> = (0..MAX_SESSION_REPOS + 3)
+            .map(|index| {
+                let repo = fake_repo(&ws, &format!("r{index}"));
+                format!(
+                    r#"{{"type":"assistant","sessionId":"a","cwd":"/","message":{{"content":[{{"type":"tool_use","input":{{"file_path":"{}/x"}}}}]}}}}"#,
+                    repo.display()
+                )
+            })
+            .chain([r#"{"type":"user","sessionId":"a","cwd":"/","message":{"role":"user","content":"hi"}}"#.to_owned()])
+            .collect();
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        write_transcript(dir.path(), "p", "a", &lines);
+
+        let sessions = ClaudeSessionScanner::new(dir.path()).scan();
+
+        assert_eq!(sessions[0].repos.len(), MAX_SESSION_REPOS);
+        assert!(sessions[0].repos[0].ends_with(&format!("r{}", MAX_SESSION_REPOS + 2)));
     }
 
     #[test]

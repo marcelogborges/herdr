@@ -51,7 +51,7 @@ impl SocketBridge {
         }
     }
 
-    fn call(&self, id: &str, method: Method) -> Result<Value, String> {
+    pub(crate) fn call(&self, id: &str, method: Method) -> Result<Value, String> {
         let value = self
             .client
             .request_value_with_timeout(
@@ -324,6 +324,7 @@ mod tests {
             cwd: "/home/me/projects".into(),
             context: context.into(),
             worktree_path: None,
+            repos: Vec::new(),
             updated_at_ms: updated,
             pane_id: pane.map(str::to_owned),
         }
