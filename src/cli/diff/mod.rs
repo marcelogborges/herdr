@@ -9,10 +9,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{
-    self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
-    KeyEventKind,
-};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
@@ -67,22 +64,12 @@ fn enter_terminal() -> io::Result<Tui> {
 
 fn resume_terminal() -> io::Result<()> {
     terminal::enable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        EnableFocusChange
-    )
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)
 }
 
 fn suspend_terminal() -> io::Result<()> {
     terminal::disable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        DisableFocusChange,
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )
+    execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen)
 }
 
 fn leave_terminal(terminal: &mut Tui) -> io::Result<()> {
@@ -135,10 +122,6 @@ fn run_tui(
             pending.push(match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => state.key(key),
                 Event::Mouse(mouse) => state.mouse(mouse),
-                Event::FocusGained => Effects {
-                    jobs: state.focus_gained(Instant::now()).into_iter().collect(),
-                    ..Effects::default()
-                },
                 _ => Effects::default(),
             });
         }

@@ -11,7 +11,6 @@ use super::worker::{Job, Outcome, Source};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const NOTICE_TTL: Duration = Duration::from_secs(6);
-const FOCUS_REFRESH_AFTER: Duration = Duration::from_secs(3);
 const WHEEL_STEP: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -134,7 +133,6 @@ pub(crate) struct DiffState {
     pub notice: Option<Notice>,
     pub loading: bool,
     pub stale: bool,
-    pub last_refresh: Option<Instant>,
     pub hits: Vec<(Rect, Hit)>,
     pub list_height: usize,
     pub body_width: u16,
@@ -158,7 +156,6 @@ impl DiffState {
             notice: None,
             loading: false,
             stale: false,
-            last_refresh: None,
             hits: Vec::new(),
             list_height: 10,
             body_width: 80,
@@ -196,13 +193,6 @@ impl DiffState {
         view.width = width;
         let (root, path) = (view.root.clone(), view.path.clone());
         self.file_job(&root, &path)
-    }
-
-    pub(crate) fn focus_gained(&mut self, now: Instant) -> Option<Job> {
-        let due = self
-            .last_refresh
-            .is_none_or(|last| now.duration_since(last) >= FOCUS_REFRESH_AFTER);
-        due.then(|| self.start_refresh()).flatten()
     }
 
     pub(crate) fn notify(&mut self, text: impl Into<String>, error: bool) {
@@ -491,7 +481,6 @@ impl DiffState {
                     effects.jobs.extend(self.start_refresh());
                     return effects;
                 }
-                self.last_refresh = Some(Instant::now());
                 let (changed, clean): (Vec<RepoDiff>, Vec<RepoDiff>) =
                     repos.into_iter().partition(RepoDiff::has_changes);
                 self.repos = changed.into_iter().chain(clean).collect();
