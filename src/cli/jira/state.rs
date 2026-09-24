@@ -116,6 +116,7 @@ pub(crate) struct JiraState {
     pub issues: Vec<Issue>,
     pub rows: Vec<Row>,
     pub collapsed: HashSet<String>,
+    pub seen_groups: HashSet<String>,
     pub selection: Option<Selection>,
     pub scroll: usize,
     pub links: HashMap<String, LinkedSession>,
@@ -150,6 +151,7 @@ impl JiraState {
             issues: Vec::new(),
             rows: Vec::new(),
             collapsed: HashSet::new(),
+            seen_groups: HashSet::new(),
             selection: None,
             scroll: 0,
             links: HashMap::new(),
@@ -220,8 +222,17 @@ impl JiraState {
 
     fn rebuild_rows(&mut self) {
         let groups = group_issues(&self.issues, &self.status_order);
+        let highlighted = match &self.selection {
+            Some(Selection::Issue(key)) => self.issue(key).map(|issue| issue.status.clone()),
+            _ => None,
+        };
         let mut rows = Vec::new();
         for group in groups {
+            if self.seen_groups.insert(group.status.clone())
+                && highlighted.as_deref() != Some(group.status.as_str())
+            {
+                self.collapsed.insert(group.status.clone());
+            }
             let collapsed = self.collapsed.contains(&group.status);
             rows.push(Row::Header {
                 status: group.status.clone(),
@@ -886,6 +897,13 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn loaded_state() -> JiraState {
+        let mut state = freshly_loaded_state();
+        state.collapsed.clear();
+        state.rebuild_rows();
+        state
+    }
+
+    fn freshly_loaded_state() -> JiraState {
         let mut state = JiraState::new(
             "VK25".into(),
             "https://x.atlassian.net/browse/".into(),
@@ -959,6 +977,40 @@ pub(crate) mod tests {
             Some("working")
         );
         assert!(!state.loading);
+    }
+
+    #[test]
+    fn first_load_collapses_every_group_except_the_highlighted_issue() {
+        let mut state = freshly_loaded_state();
+
+        assert_eq!(
+            state.rows,
+            [
+                Row::Header {
+                    status: "Development".into(),
+                    count: 1,
+                    collapsed: true
+                },
+                Row::Header {
+                    status: "Code Review".into(),
+                    count: 2,
+                    collapsed: false
+                },
+                Row::Issue("VK25-1".into()),
+                Row::Issue("VK25-3".into()),
+            ]
+        );
+        assert_eq!(state.selection, Some(Selection::Issue("VK25-3".into())));
+
+        state.toggle_group("Development");
+        state.issues.push(issue("VK25-4", "QA - Staging"));
+        state.rebuild_rows();
+        assert!(state.rows.contains(&Row::Issue("VK25-2".into())));
+        assert!(state.rows.contains(&Row::Header {
+            status: "QA - Staging".into(),
+            count: 1,
+            collapsed: true
+        }));
     }
 
     #[test]
