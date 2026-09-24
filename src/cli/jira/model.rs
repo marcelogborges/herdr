@@ -94,6 +94,55 @@ pub(crate) struct IssueDetail {
     pub sprint: Option<String>,
     pub story_points: Option<f64>,
     pub development: Option<String>,
+    pub pull_requests: Vec<PullRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequest {
+    pub status: String,
+    pub title: String,
+    pub url: String,
+    pub repository: String,
+}
+
+impl PullRequest {
+    pub(crate) fn label(&self) -> String {
+        let number = self.url.rsplit('/').next().unwrap_or_default();
+        if self.repository.is_empty() || number.is_empty() {
+            self.url.clone()
+        } else {
+            format!("{}#{number}", self.repository)
+        }
+    }
+}
+
+pub(crate) fn pull_request_instance_types(summary: &Value) -> Vec<String> {
+    summary
+        .get("summary")
+        .and_then(|summary| summary.get("pullrequest"))
+        .and_then(|pr| pr.get("byInstanceType"))
+        .and_then(Value::as_object)
+        .map(|types| types.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+pub(crate) fn pull_requests_from_detail(detail: &Value) -> Vec<PullRequest> {
+    detail
+        .get("detail")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("pullRequests").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|pr| {
+            Some(PullRequest {
+                status: str_at(pr, &["status"]).unwrap_or_default(),
+                title: str_at(pr, &["name"]).unwrap_or_default(),
+                url: str_at(pr, &["url"])?,
+                repository: str_at(pr, &["repositoryName"]).unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 impl IssueDetail {
@@ -117,6 +166,7 @@ impl IssueDetail {
             development: fields
                 .get(&fields_ids.development)
                 .and_then(development_summary),
+            pull_requests: Vec::new(),
         })
     }
 }
@@ -365,5 +415,23 @@ mod tests {
         assert_eq!(priority_icon(Some("High")), "↑");
         assert_eq!(priority_icon(Some("Lowest")), "⇊");
         assert_eq!(priority_icon(None), " ");
+    }
+
+    #[test]
+    fn pull_requests_come_from_dev_status_summary_and_detail() {
+        let summary = serde_json::json!({"summary": {"pullrequest": {"byInstanceType": {"oAuth-com.github.integration.production": {}}}}});
+        assert_eq!(
+            pull_request_instance_types(&summary),
+            ["oAuth-com.github.integration.production"]
+        );
+        let detail = serde_json::json!({"detail": [{"pullRequests": [
+            {"status": "OPEN", "name": "VK25-1: x", "url": "https://github.com/vakinha/vakinha-web/pull/5783", "repositoryName": "vakinha/vakinha-web"},
+            {"status": "MERGED", "name": "sem url"}
+        ]}]});
+        let prs = pull_requests_from_detail(&detail);
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].label(), "vakinha/vakinha-web#5783");
+        assert_eq!(prs[0].status, "OPEN");
+        assert!(pull_request_instance_types(&serde_json::json!({})).is_empty());
     }
 }

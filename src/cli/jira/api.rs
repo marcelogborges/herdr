@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::model::{Comment, Issue, IssueDetail, Transition};
+use super::model::{
+    pull_request_instance_types, pull_requests_from_detail, Comment, Issue, IssueDetail,
+    PullRequest, Transition,
+};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const SEARCH_FIELDS: &str = "summary,status,priority,assignee,issuetype,updated,parent";
@@ -114,8 +117,34 @@ impl JiraApi {
         );
         let path = format!("/rest/api/3/issue/{}?fields={fields}", percent_encode(key));
         let value = self.request("GET", &path, None)?;
-        IssueDetail::from_json(&value, &self.fields)
-            .ok_or_else(|| JiraError::Parse(format!("issue {key} incompleta")))
+        let mut detail = IssueDetail::from_json(&value, &self.fields)
+            .ok_or_else(|| JiraError::Parse(format!("issue {key} incompleta")))?;
+        if let Some(issue_id) = value.get("id").and_then(Value::as_str) {
+            detail.pull_requests = self.pull_requests(issue_id);
+        }
+        Ok(detail)
+    }
+
+    fn pull_requests(&self, issue_id: &str) -> Vec<PullRequest> {
+        let summary_path = format!(
+            "/rest/dev-status/latest/issue/summary?issueId={}",
+            percent_encode(issue_id)
+        );
+        let Ok(summary) = self.request("GET", &summary_path, None) else {
+            return Vec::new();
+        };
+        pull_request_instance_types(&summary)
+            .into_iter()
+            .filter_map(|application| {
+                let path = format!(
+                    "/rest/dev-status/latest/issue/detail?issueId={}&applicationType={}&dataType=pullrequest",
+                    percent_encode(issue_id),
+                    percent_encode(&application)
+                );
+                self.request("GET", &path, None).ok()
+            })
+            .flat_map(|detail| pull_requests_from_detail(&detail))
+            .collect()
     }
 
     pub(crate) fn transitions(&self, key: &str) -> Result<Vec<Transition>, JiraError> {

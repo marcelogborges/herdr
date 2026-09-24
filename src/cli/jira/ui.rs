@@ -436,6 +436,30 @@ pub(crate) fn detail_lines(
             .map(|(key, summary)| format!("{key} {summary}")),
     );
     field("desenvolvimento", detail.development.clone());
+    for pull_request in &detail.pull_requests {
+        let mut spans = vec![span("  ", dim)];
+        if !pull_request.status.is_empty() {
+            spans.push(span(
+                &format!("{} ", pull_request.status.to_lowercase()),
+                dim,
+            ));
+        }
+        spans.push(RichSpan {
+            text: pull_request.label(),
+            style: SpanStyle {
+                underline: true,
+                ..SpanStyle::default()
+            },
+            link: Some(pull_request.url.clone()),
+        });
+        if !pull_request.title.is_empty() {
+            spans.push(span(&format!(" {}", pull_request.title), dim));
+        }
+        lines.push(RichLine {
+            spans,
+            ..RichLine::default()
+        });
+    }
     let url = format!("{browse_base}{}", issue.key);
     lines.push(RichLine {
         spans: vec![
@@ -1001,6 +1025,12 @@ mod tests {
             sprint: Some("Sprint 9".into()),
             story_points: Some(2.0),
             development: Some("1 PR (open)".into()),
+            pull_requests: vec![super::super::model::PullRequest {
+                status: "OPEN".into(),
+                title: "VK25-3: tela nova".into(),
+                url: "https://github.com/vakinha/vakinha-web/pull/5783".into(),
+                repository: "vakinha/vakinha-web".into(),
+            }],
         };
         state.apply(Outcome::Detail(detail));
         let terminal = draw(&mut state, 70, 30);
@@ -1008,6 +1038,7 @@ mod tests {
 
         for expected in [
             "VK25-3 · Task · Code Review",
+            "open vakinha/vakinha-web#5783 VK25-3: tela nova",
             "sprint: Sprint 9",
             "pontos: 2",
             "desenvolvimento: 1 PR (open)",
