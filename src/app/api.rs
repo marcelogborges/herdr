@@ -1087,6 +1087,10 @@ impl App {
             Method::RightPanelOpen(params) => {
                 return self.handle_right_panel_open(request.id, params)
             }
+            Method::RightPanelSetWidth(params) => {
+                self.set_right_panel_width(params.width);
+                return responses::encode_success(request.id, ResponseResult::Ok {});
+            }
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),
             Method::TabMove(params) => return self.handle_tab_move(request.id, params),

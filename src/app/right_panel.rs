@@ -47,6 +47,13 @@ impl App {
         self.show_right_panel(RightPanelMode::Files);
     }
 
+    pub(crate) fn set_right_panel_width(&mut self, width: Option<u16>) {
+        if self.state.right_panel.manual_width != width {
+            self.state.right_panel.manual_width = width;
+            self.request_right_panel_render();
+        }
+    }
+
     fn release_exited_right_panel_instances(&mut self) {
         for instance in self.state.right_panel.take_exited() {
             self.release_right_panel_instance(instance);
@@ -560,6 +567,29 @@ mod tests {
         );
         let _ = std::fs::remove_file(&file);
         app.release_right_panel_instance(active);
+    }
+
+    #[test]
+    fn set_width_survives_hide_show_and_config_reload_until_reset() {
+        let mut app = test_app();
+        app.set_right_panel_width(Some(40));
+        app.toggle_right_panel();
+        app.toggle_right_panel();
+        app.toggle_right_panel();
+        assert_eq!(app.state.right_panel.manual_width, Some(40));
+
+        let width = app.state.right_panel.width;
+        app.state
+            .right_panel
+            .apply_config(width, &crate::config::RightPanelConfig::default());
+        assert_eq!(app.state.right_panel.manual_width, Some(40));
+
+        app.set_right_panel_width(None);
+        assert_eq!(app.state.right_panel.manual_width, None);
+        assert_eq!(
+            app.state.right_panel.effective_width(),
+            app.state.right_panel.width
+        );
     }
 
     #[test]

@@ -123,6 +123,8 @@ pub enum Method {
     RightPanelShow(RightPanelShowParams),
     #[serde(rename = "right_panel.open")]
     RightPanelOpen(RightPanelOpenParams),
+    #[serde(rename = "right_panel.set_width")]
+    RightPanelSetWidth(RightPanelSetWidthParams),
     #[serde(rename = "agent.list")]
     AgentList(EmptyParams),
     #[serde(rename = "agent.get")]

@@ -135,3 +135,147 @@ fn typing_goes_to_the_panel_when_the_snapshot_focuses_it() {
         [ClientMessage::ClientShellPaneInput { pane_id, .. }] if pane_id == PANEL_ID
     ));
 }
+
+fn mouse(
+    state: &mut ClientShellState,
+    kind: MouseEventKind,
+    column: u16,
+    row: u16,
+) -> ClientShellInput {
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::empty(),
+    })])
+}
+
+fn sent_widths(input: &ClientShellInput) -> Vec<Option<u16>> {
+    endpoint_methods(input)
+        .into_iter()
+        .filter_map(|method| match method {
+            crate::api::schema::Method::RightPanelSetWidth(params) => Some(params.width),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn dragging_the_panel_divider_sends_throttled_widths_and_a_final_width() {
+    let mut state = state_with_panel();
+    let hit = panel_hit(&state);
+    let right_edge = hit.rect.x + hit.rect.width;
+    let row = hit.rect.y + 2;
+
+    let press = mouse(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        hit.rect.x,
+        row,
+    );
+    assert!(endpoint_methods(&press).is_empty());
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::RightPanelWidth { .. })
+    ));
+
+    let first = mouse(
+        &mut state,
+        MouseEventKind::Drag(MouseButton::Left),
+        hit.rect.x - 5,
+        row,
+    );
+    assert_eq!(sent_widths(&first), [Some(right_edge - (hit.rect.x - 5))]);
+
+    let throttled = mouse(
+        &mut state,
+        MouseEventKind::Drag(MouseButton::Left),
+        hit.rect.x - 6,
+        row,
+    );
+    assert!(sent_widths(&throttled).is_empty());
+
+    let release = mouse(
+        &mut state,
+        MouseEventKind::Up(MouseButton::Left),
+        hit.rect.x - 8,
+        row,
+    );
+    assert_eq!(sent_widths(&release), [Some(right_edge - (hit.rect.x - 8))]);
+    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn releasing_at_the_last_sent_width_sends_nothing_more() {
+    let mut state = state_with_panel();
+    let hit = panel_hit(&state);
+    let row = hit.rect.y + 2;
+    mouse(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        hit.rect.x,
+        row,
+    );
+    mouse(
+        &mut state,
+        MouseEventKind::Drag(MouseButton::Left),
+        hit.rect.x + 3,
+        row,
+    );
+
+    let release = mouse(
+        &mut state,
+        MouseEventKind::Up(MouseButton::Left),
+        hit.rect.x + 3,
+        row,
+    );
+
+    assert!(sent_widths(&release).is_empty());
+}
+
+#[test]
+fn double_clicking_the_panel_divider_resets_the_width() {
+    let mut state = state_with_panel();
+    let hit = panel_hit(&state);
+    let row = hit.rect.y + 2;
+    mouse(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        hit.rect.x,
+        row,
+    );
+    mouse(
+        &mut state,
+        MouseEventKind::Up(MouseButton::Left),
+        hit.rect.x,
+        row,
+    );
+
+    let second = mouse(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        hit.rect.x,
+        row,
+    );
+
+    assert_eq!(sent_widths(&second), [None]);
+    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn pressing_inside_the_panel_does_not_start_a_width_drag() {
+    let mut state = state_with_panel();
+    let hit = panel_hit(&state);
+
+    mouse(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        hit.rect.x + 1,
+        hit.rect.y + 2,
+    );
+
+    assert!(!matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::RightPanelWidth { .. })
+    ));
+}

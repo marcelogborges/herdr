@@ -126,6 +126,7 @@ pub(crate) struct RightPanelState {
     pub focused: bool,
     pub mode: RightPanelMode,
     pub width: PopupSize,
+    pub manual_width: Option<u16>,
     pub files_command: String,
     pub diff_command: String,
     pub open_command: String,
@@ -143,6 +144,7 @@ impl Default for RightPanelState {
             focused: false,
             mode: RightPanelMode::Files,
             width: default_width(),
+            manual_width: None,
             files_command: config.files_command,
             diff_command: config.diff_command,
             open_command: config.open_command,
@@ -173,14 +175,18 @@ impl RightPanelState {
         if !self.visible {
             return area;
         }
-        split_area(area, self.width).map_or(area, |(tab, _)| tab)
+        split_area(area, self.effective_width()).map_or(area, |(tab, _)| tab)
     }
 
     pub(crate) fn panel_rect(&self, area: Rect) -> Option<Rect> {
         if !self.visible {
             return None;
         }
-        split_area(area, self.width).map(|(_, panel)| panel)
+        split_area(area, self.effective_width()).map(|(_, panel)| panel)
+    }
+
+    pub(crate) fn effective_width(&self) -> PopupSize {
+        self.manual_width.map_or(self.width, PopupSize::Cells)
     }
 
     pub(crate) fn active_instance(&self) -> Option<&RightPanelInstance> {
@@ -395,6 +401,24 @@ mod tests {
         state.visible = true;
         assert_eq!(state.tab_area(area).width, 66);
         assert_eq!(state.panel_rect(area), Some(Rect::new(66, 0, 54, 40)));
+    }
+
+    #[test]
+    fn manual_width_overrides_config_within_the_clamps() {
+        let area = Rect::new(0, 0, 120, 40);
+        let mut state = RightPanelState {
+            visible: true,
+            ..Default::default()
+        };
+        state.manual_width = Some(30);
+        assert_eq!(state.panel_rect(area).unwrap().width, 30);
+        assert_eq!(state.tab_area(area).width, 90);
+        state.manual_width = Some(5);
+        assert_eq!(state.panel_rect(area).unwrap().width, MIN_PANEL_COLS);
+        state.manual_width = Some(500);
+        assert_eq!(state.tab_area(area).width, MIN_TAB_COLS);
+        state.manual_width = None;
+        assert_eq!(state.panel_rect(area).unwrap().width, 54);
     }
 
     #[test]

@@ -3989,6 +3989,20 @@
           ],
           "type": "object"
         },
+        "RightPanelSetWidthParams": {
+          "properties": {
+            "width": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "RightPanelShowParams": {
           "properties": {
             "mode": {
@@ -5441,6 +5455,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/RightPanelOpenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.set_width",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelSetWidthParams"
             }
           },
           "required": [

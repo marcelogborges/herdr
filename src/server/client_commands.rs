@@ -38,6 +38,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.zoom",
     "product_announcement.dismiss",
     "release_notes.dismiss",
+    "right_panel.set_width",
     "right_panel.show",
     "right_panel.toggle",
     "server.reload_config",
@@ -303,6 +304,10 @@ mod tests {
         assert_eq!(
             actual.remove("claude_session.open").as_deref(),
             Some("220b7618f2f9cf9c41a79d913ef9bc45f7bd9afa9fc1084e1dced5d98db4955f")
+        );
+        assert_eq!(
+            actual.remove("right_panel.set_width").as_deref(),
+            Some("20445a681f9fa8555b8afc0553323fddb355566c251d2f8d6ed4b10c02b8b074")
         );
         assert_eq!(
             actual.remove("right_panel.show").as_deref(),

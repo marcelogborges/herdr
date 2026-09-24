@@ -31,6 +31,12 @@ pub struct RightPanelShowParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RightPanelSetWidthParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RightPanelOpenParams {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

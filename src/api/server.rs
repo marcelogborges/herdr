@@ -522,6 +522,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::RightPanelToggle(_) => "right_panel.toggle",
         Method::RightPanelShow(_) => "right_panel.show",
         Method::RightPanelOpen(_) => "right_panel.open",
+        Method::RightPanelSetWidth(_) => "right_panel.set_width",
         Method::AgentList(_) => "agent.list",
         Method::AgentGet(_) => "agent.get",
         Method::AgentRead(_) => "agent.read",
