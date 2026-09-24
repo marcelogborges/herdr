@@ -31,8 +31,14 @@ fn panel_pane() -> PaneSurfacePane {
 }
 
 fn state_with_panel() -> ClientShellState {
+    state_with_panel_tabs(Vec::new())
+}
+
+fn state_with_panel_tabs(right_panel_tabs: Vec<String>) -> ClientShellState {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
+    let mut snapshot = snapshot();
+    snapshot.right_panel_tabs = right_panel_tabs;
+    state.set_snapshot(Box::new(snapshot));
     let mut surface = surface();
     surface.panes.push(panel_pane());
     state.set_pane_surface(surface);
@@ -74,7 +80,8 @@ fn endpoint_methods(input: &ClientShellInput) -> Vec<crate::api::schema::Method>
 fn header_tab_click_switches_the_panel_mode() {
     let mut state = state_with_panel();
     let hit = panel_hit(&state);
-    let (_, diff) = crate::right_panel::header_tabs(hit.rect)
+    let modes = crate::right_panel::header_modes(&[]);
+    let (_, diff) = crate::right_panel::header_tabs(hit.rect, &modes)
         .into_iter()
         .find(|(mode, _)| *mode == crate::right_panel::RightPanelMode::Diff)
         .expect("diff tab");
@@ -85,6 +92,25 @@ fn header_tab_click_switches_the_panel_mode() {
         &endpoint_methods(&input)[..],
         [crate::api::schema::Method::RightPanelShow(params)]
             if params.mode == crate::right_panel::RightPanelMode::Diff
+    ));
+}
+
+#[test]
+fn header_click_on_a_custom_tab_shows_it_by_label() {
+    let mut state = state_with_panel_tabs(vec!["rc".into()]);
+    let hit = panel_hit(&state);
+    let custom = crate::right_panel::RightPanelMode::Custom("rc".into());
+    let modes = crate::right_panel::header_modes(&["rc".into()]);
+    let (_, rect) = crate::right_panel::header_tabs(hit.rect, &modes)
+        .into_iter()
+        .find(|(mode, _)| *mode == custom)
+        .expect("custom tab");
+
+    let input = click(&mut state, rect.x + 1, rect.y);
+
+    assert!(matches!(
+        &endpoint_methods(&input)[..],
+        [crate::api::schema::Method::RightPanelShow(params)] if params.mode == custom
     ));
 }
 

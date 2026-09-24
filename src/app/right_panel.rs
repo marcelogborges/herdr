@@ -9,7 +9,7 @@ use crate::layout::PaneId;
 use crate::pane::PaneLaunchEnv;
 use crate::right_panel::{
     self, RightPanelCycleDirection, RightPanelInstance, RightPanelMode, MAX_INSTANCES,
-    PANEL_OWNER_PANE_ENV,
+    PANEL_OWNER_PANE_ENV, SESSION_REPOS_ENV,
 };
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 use crate::ui::TabSurfaceTarget;
@@ -71,8 +71,10 @@ impl App {
             return;
         };
         self.release_exited_right_panel_instances(owner);
+        let current = self.state.right_panel.pane_mut(owner).mode.clone();
+        let mode = self.state.right_panel.cycled(&current, direction);
         let pane = self.state.right_panel.pane_mut(owner);
-        pane.mode = pane.mode.cycled(direction);
+        pane.mode = mode;
         if !pane.visible {
             pane.visible = true;
             pane.focused = true;
@@ -112,6 +114,17 @@ impl App {
         }
         self.request_right_panel_render();
         true
+    }
+
+    pub(crate) fn apply_right_panel_config(
+        &mut self,
+        width: crate::popup_size::PopupSize,
+        config: &crate::config::RightPanelConfig,
+    ) {
+        for removed in self.state.right_panel.apply_config(width, config) {
+            self.release_right_panel_instance(removed);
+        }
+        self.request_right_panel_render();
     }
 
     pub(crate) fn set_right_panel_width(&mut self, width: Option<u16>) {
@@ -230,12 +243,21 @@ impl App {
             self.apply_right_panel_open(target, owner, open, panel);
             return;
         }
-        if let Some(index) = self.state.right_panel.instance_for(owner, pane.mode) {
+        if let Some(index) = self.state.right_panel.instance_for(owner, &pane.mode) {
             self.state.right_panel.touch(index);
             return;
         }
+        let Some(command) = self
+            .state
+            .right_panel
+            .command(&pane.mode)
+            .map(str::to_owned)
+        else {
+            self.state.right_panel.pane_mut(owner).mode = RightPanelMode::Files;
+            self.sync_right_panel(target, panel);
+            return;
+        };
         let dir = self.right_panel_dir(Some((target.workspace_index, owner)));
-        let command = self.state.right_panel.command(pane.mode).to_owned();
         self.start_right_panel_instance(owner, pane.mode, dir, command, panel);
     }
 
@@ -250,7 +272,7 @@ impl App {
             && self
                 .state
                 .right_panel
-                .instance_for(owner, RightPanelMode::Files)
+                .instance_for(owner, &RightPanelMode::Files)
                 .is_some_and(|index| {
                     let instance = &self.state.right_panel.instances[index];
                     !instance.exited && instance.dir == open.dir
@@ -262,7 +284,7 @@ impl App {
         if let Some(replaced) = self
             .state
             .right_panel
-            .take_instance(owner, RightPanelMode::Files)
+            .take_instance(owner, &RightPanelMode::Files)
         {
             self.release_right_panel_instance(replaced);
         }
@@ -327,6 +349,14 @@ impl App {
     }
 
     fn pane_claude_worktree(&self, ws_idx: usize, pane_id: PaneId) -> Option<String> {
+        self.pane_claude_session(ws_idx, pane_id)?.worktree_path
+    }
+
+    fn pane_claude_session(
+        &self,
+        ws_idx: usize,
+        pane_id: PaneId,
+    ) -> Option<crate::claude_sessions::ClaudeSession> {
         let terminal_id = self.state.workspaces.get(ws_idx)?.terminal_id(pane_id)?;
         let terminal = self.state.terminals.get(terminal_id)?;
         let session = crate::app::creation::terminal_agent_session_info(terminal)?;
@@ -338,7 +368,21 @@ impl App {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|candidate| candidate.session_id == session.value)
-            .and_then(|candidate| candidate.worktree_path.clone())
+            .cloned()
+    }
+
+    fn right_panel_env(&self, owner: PaneId) -> Vec<(String, String)> {
+        let mut env = self.custom_command_env().0;
+        let located = self.find_pane(owner).map(|(ws_idx, _)| ws_idx);
+        if let Some(owner_id) = located.and_then(|ws_idx| self.public_pane_id(ws_idx, owner)) {
+            env.push((PANEL_OWNER_PANE_ENV.to_owned(), owner_id));
+        }
+        let repos = located
+            .and_then(|ws_idx| self.pane_claude_session(ws_idx, owner))
+            .map(|session| session.repos.join("\n"))
+            .unwrap_or_default();
+        env.push((SESSION_REPOS_ENV.to_owned(), repos));
+        env
     }
 
     fn spawn_right_panel_instance(
@@ -352,14 +396,8 @@ impl App {
     ) -> std::io::Result<RightPanelInstance> {
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
-        let mut extra_env = self.custom_command_env().0;
-        if let Some(owner_id) = self
-            .find_pane(owner)
-            .and_then(|(ws_idx, _)| self.public_pane_id(ws_idx, owner))
-        {
-            extra_env.push((PANEL_OWNER_PANE_ENV.to_owned(), owner_id));
-        }
-        let launch_env = PaneLaunchEnv::from_extra(extra_env).without_pane_identity();
+        let launch_env =
+            PaneLaunchEnv::from_extra(self.right_panel_env(owner)).without_pane_identity();
         let runtime = TerminalRuntime::spawn_shell_command(
             pane_id,
             rows.max(1),
@@ -536,7 +574,7 @@ mod tests {
         let mut seen = Vec::new();
         for _ in 0..3 {
             app.cycle_right_panel(RightPanelCycleDirection::Next);
-            seen.push(app.state.right_panel.pane(owner).unwrap().mode);
+            seen.push(app.state.right_panel.pane(owner).unwrap().mode.clone());
         }
 
         assert_eq!(
@@ -558,7 +596,7 @@ mod tests {
         let mut seen = Vec::new();
         for _ in 0..3 {
             app.cycle_right_panel(RightPanelCycleDirection::Previous);
-            seen.push(app.state.right_panel.pane(owner).unwrap().mode);
+            seen.push(app.state.right_panel.pane(owner).unwrap().mode.clone());
         }
 
         assert_eq!(
@@ -819,9 +857,7 @@ mod tests {
         app.toggle_right_panel();
         app.toggle_right_panel();
         let width = app.state.right_panel.width;
-        app.state
-            .right_panel
-            .apply_config(width, &crate::config::RightPanelConfig::default());
+        app.apply_right_panel_config(width, &crate::config::RightPanelConfig::default());
         assert_eq!(app.state.right_panel.manual_width, Some(40));
 
         app.set_right_panel_width(None);

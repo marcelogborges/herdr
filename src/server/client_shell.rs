@@ -301,6 +301,7 @@ pub(super) fn snapshot_with_completions(
         agents,
         commands: app.client_shell_command_manifest(),
         claude_sessions,
+        right_panel_tabs: app.state.right_panel.custom_labels(),
     };
     (shell, completions)
 }
@@ -599,7 +600,7 @@ fn render_right_panel(
         cell.set_symbol(" ");
         cell.set_style(header);
     }
-    let tabs = crate::right_panel::header_tabs(panel);
+    let tabs = crate::right_panel::header_tabs(panel, &state.modes());
     for (mode, rect) in &tabs {
         let style = if *mode == pane_state.mode {
             header
@@ -627,7 +628,7 @@ fn render_right_panel(
     if instance.exited {
         let notice = format!(
             " {} exited · click files/diff or prefix+i to close ",
-            state.command(instance.mode)
+            state.command(&instance.mode).unwrap_or_default()
         );
         let row = content.y + content.height - 1;
         let style = Style::default().bg(palette.red).fg(palette.panel_bg);

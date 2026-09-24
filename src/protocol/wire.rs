@@ -957,6 +957,8 @@ pub struct ClientShellSnapshot {
     /// Recent Claude Code sessions read from the endpoint's Claude config directory.
     #[serde(default)]
     pub claude_sessions: Vec<ClientShellClaudeSession>,
+    #[serde(default)]
+    pub right_panel_tabs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2771,6 +2773,7 @@ mod tests {
                 updated_at_ms: 1_700_000_000_000,
                 pane_id: Some("w1:p1".into()),
             }],
+            right_panel_tabs: vec!["rails c".into()],
         }));
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
         let (decoded, _): (ServerMessage, _) =

@@ -395,6 +395,7 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
     );
 
     diagnostics.extend(config.theme.diagnostics());
+    diagnostics.extend(config.right_panel.diagnostics());
 
     Ok(LoadedConfig {
         config,

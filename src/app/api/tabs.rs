@@ -150,6 +150,13 @@ impl App {
         id: String,
         params: crate::api::schema::RightPanelShowParams,
     ) -> String {
+        if self.state.right_panel.command(&params.mode).is_none() {
+            return encode_error(
+                id,
+                "unknown_mode",
+                format!("unknown right panel tab {}", params.mode.label()),
+            );
+        }
         self.show_right_panel(params.mode);
         encode_success(id, ResponseResult::Ok {})
     }

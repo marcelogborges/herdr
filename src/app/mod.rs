@@ -535,7 +535,7 @@ impl App {
             popup_pane: None,
             right_panel: {
                 let mut right_panel = crate::right_panel::RightPanelState::default();
-                right_panel.apply_config(config.ui.right_panel_width, &config.right_panel);
+                let _ = right_panel.apply_config(config.ui.right_panel_width, &config.right_panel);
                 right_panel
             },
             plugin_command_logs: Vec::new(),
@@ -885,9 +885,7 @@ impl App {
 
         if !invalid_section("right_panel") {
             let width = self.state.right_panel.width;
-            self.state
-                .right_panel
-                .apply_config(width, &config.right_panel);
+            self.apply_right_panel_config(width, &config.right_panel);
         }
 
         if !invalid_section("session")

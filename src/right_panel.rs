@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
-use crate::config::RightPanelConfig;
+use crate::config::{RightPanelConfig, RightPanelTabConfig};
 
 use crate::layout::PaneId;
 use crate::popup_size::PopupSize;
@@ -15,42 +15,73 @@ pub(crate) const FAILED_START_WINDOW: std::time::Duration = std::time::Duration:
 const MIN_PANEL_COLS: u16 = 20;
 const MIN_TAB_COLS: u16 = 20;
 pub(crate) const PANEL_OWNER_PANE_ENV: &str = "HERDR_PANEL_OWNER_PANE_ID";
+pub(crate) const SESSION_REPOS_ENV: &str = "HERDR_SESSION_REPOS";
 const DEFAULT_WIDTH_PERCENT: u8 = 45;
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum RightPanelMode {
     #[default]
     Files,
     Diff,
     Jira,
+    Custom(String),
 }
 
 impl RightPanelMode {
-    pub(crate) const ALL: [RightPanelMode; 3] = [
+    pub(crate) const BUILTIN: [RightPanelMode; 3] = [
         RightPanelMode::Files,
         RightPanelMode::Diff,
         RightPanelMode::Jira,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(&self) -> &str {
         match self {
             Self::Files => "files",
             Self::Diff => "diff",
             Self::Jira => "jira",
+            Self::Custom(label) => label,
         }
     }
 
-    pub(crate) fn cycled(self, direction: RightPanelCycleDirection) -> Self {
-        let len = Self::ALL.len();
-        let index = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
-        let next = match direction {
-            RightPanelCycleDirection::Next => (index + 1) % len,
-            RightPanelCycleDirection::Previous => (index + len - 1) % len,
-        };
-        Self::ALL[next]
+    pub(crate) fn from_label(label: &str) -> Self {
+        Self::BUILTIN
+            .into_iter()
+            .find(|mode| mode.label() == label)
+            .unwrap_or_else(|| Self::Custom(label.to_owned()))
+    }
+}
+
+impl Serialize for RightPanelMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.label())
+    }
+}
+
+impl<'de> Deserialize<'de> for RightPanelMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let label = String::deserialize(deserializer)?;
+        Ok(Self::from_label(&label))
+    }
+}
+
+impl schemars::JsonSchema for RightPanelMode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "RightPanelMode".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": ["files", "diff", "jira"]
+                },
+                {
+                    "type": "string",
+                    "description": "Label of a [[right_panel.tabs]] entry."
+                }
+            ]
+        })
     }
 }
 
@@ -86,16 +117,29 @@ pub(crate) fn content_rect(panel: Rect) -> Rect {
     )
 }
 
-pub(crate) fn header_tabs(panel: Rect) -> Vec<(RightPanelMode, Rect)> {
+pub(crate) fn header_modes(custom_labels: &[String]) -> Vec<RightPanelMode> {
+    RightPanelMode::BUILTIN
+        .into_iter()
+        .chain(
+            custom_labels
+                .iter()
+                .map(|label| RightPanelMode::Custom(label.clone())),
+        )
+        .collect()
+}
+
+pub(crate) fn header_tabs(panel: Rect, modes: &[RightPanelMode]) -> Vec<(RightPanelMode, Rect)> {
     let mut x = panel.x.saturating_add(2);
     let right = panel.x.saturating_add(panel.width);
     let mut tabs = Vec::new();
-    for mode in RightPanelMode::ALL {
-        let width = mode.label().len() as u16 + 2;
+    for mode in modes {
+        let width = u16::try_from(mode.label().chars().count())
+            .unwrap_or(u16::MAX)
+            .saturating_add(2);
         if x.saturating_add(width) > right {
             break;
         }
-        tabs.push((mode, Rect::new(x, panel.y, width, 1)));
+        tabs.push((mode.clone(), Rect::new(x, panel.y, width, 1)));
         x = x.saturating_add(width + 1);
     }
     tabs
@@ -161,6 +205,7 @@ pub(crate) struct RightPanelState {
     pub diff_command: String,
     pub open_command: String,
     pub jira_command: String,
+    pub custom_tabs: Vec<RightPanelTabConfig>,
     pub panes: std::collections::HashMap<PaneId, PanePanel>,
     pub instances: Vec<RightPanelInstance>,
 }
@@ -175,6 +220,7 @@ impl Default for RightPanelState {
             diff_command: config.diff_command,
             open_command: config.open_command,
             jira_command: config.jira_command,
+            custom_tabs: Vec::new(),
             panes: std::collections::HashMap::new(),
             instances: Vec::new(),
         }
@@ -182,20 +228,67 @@ impl Default for RightPanelState {
 }
 
 impl RightPanelState {
-    pub(crate) fn apply_config(&mut self, width: PopupSize, config: &RightPanelConfig) {
+    pub(crate) fn apply_config(
+        &mut self,
+        width: PopupSize,
+        config: &RightPanelConfig,
+    ) -> Vec<RightPanelInstance> {
         self.width = width;
         self.files_command = config.files_command.clone();
         self.diff_command = config.diff_command.clone();
         self.open_command = config.open_command.clone();
         self.jira_command = config.jira_command.clone();
+        self.custom_tabs = config.resolved_tabs().0;
+        let known = self.modes();
+        for pane in self.panes.values_mut() {
+            if !known.contains(&pane.mode) {
+                pane.mode = RightPanelMode::Files;
+            }
+        }
+        let (kept, removed) = std::mem::take(&mut self.instances)
+            .into_iter()
+            .partition(|instance| known.contains(&instance.mode));
+        self.instances = kept;
+        removed
     }
 
-    pub(crate) fn command(&self, mode: RightPanelMode) -> &str {
+    pub(crate) fn custom_labels(&self) -> Vec<String> {
+        self.custom_tabs
+            .iter()
+            .map(|tab| tab.label.clone())
+            .collect()
+    }
+
+    pub(crate) fn modes(&self) -> Vec<RightPanelMode> {
+        header_modes(&self.custom_labels())
+    }
+
+    pub(crate) fn command(&self, mode: &RightPanelMode) -> Option<&str> {
         match mode {
-            RightPanelMode::Files => &self.files_command,
-            RightPanelMode::Diff => &self.diff_command,
-            RightPanelMode::Jira => &self.jira_command,
+            RightPanelMode::Files => Some(&self.files_command),
+            RightPanelMode::Diff => Some(&self.diff_command),
+            RightPanelMode::Jira => Some(&self.jira_command),
+            RightPanelMode::Custom(label) => self
+                .custom_tabs
+                .iter()
+                .find(|tab| &tab.label == label)
+                .map(|tab| tab.command.as_str()),
         }
+    }
+
+    pub(crate) fn cycled(
+        &self,
+        mode: &RightPanelMode,
+        direction: RightPanelCycleDirection,
+    ) -> RightPanelMode {
+        let modes = self.modes();
+        let len = modes.len();
+        let index = modes.iter().position(|known| known == mode).unwrap_or(0);
+        let next = match direction {
+            RightPanelCycleDirection::Next => (index + 1) % len,
+            RightPanelCycleDirection::Previous => (index + len - 1) % len,
+        };
+        modes[next].clone()
     }
 
     pub(crate) fn effective_width(&self) -> PopupSize {
@@ -234,15 +327,15 @@ impl RightPanelState {
         split_area(area, self.effective_width()).map(|(_, panel)| panel)
     }
 
-    pub(crate) fn instance_for(&self, owner: PaneId, mode: RightPanelMode) -> Option<usize> {
+    pub(crate) fn instance_for(&self, owner: PaneId, mode: &RightPanelMode) -> Option<usize> {
         self.instances
             .iter()
-            .position(|instance| instance.owner == owner && instance.mode == mode)
+            .position(|instance| instance.owner == owner && &instance.mode == mode)
     }
 
     pub(crate) fn displayed(&self, owner: PaneId) -> Option<&RightPanelInstance> {
         let pane = self.pane(owner).filter(|pane| pane.visible)?;
-        self.instance_for(owner, pane.mode)
+        self.instance_for(owner, &pane.mode)
             .map(|index| &self.instances[index])
     }
 
@@ -289,7 +382,7 @@ impl RightPanelState {
     pub(crate) fn take_instance(
         &mut self,
         owner: PaneId,
-        mode: RightPanelMode,
+        mode: &RightPanelMode,
     ) -> Option<RightPanelInstance> {
         self.instance_for(owner, mode)
             .map(|index| self.instances.remove(index))
@@ -464,7 +557,7 @@ mod tests {
     fn content_and_header_tabs_follow_the_panel_rect() {
         let panel = Rect::new(60, 0, 40, 20);
         assert_eq!(content_rect(panel), Rect::new(61, 1, 39, 19));
-        let tabs = header_tabs(panel);
+        let tabs = header_tabs(panel, &header_modes(&[]));
         assert_eq!(
             tabs,
             vec![
@@ -688,8 +781,8 @@ mod tests {
         state.pane_mut(a).mode = RightPanelMode::Files;
         assert_eq!(state.displayed(a), Some(&state.instances[0]));
         assert_eq!(state.displayed(b), None);
-        assert_eq!(state.instance_for(b, RightPanelMode::Files), Some(2));
-        assert_eq!(state.instance_for(b, RightPanelMode::Diff), None);
+        assert_eq!(state.instance_for(b, &RightPanelMode::Files), Some(2));
+        assert_eq!(state.instance_for(b, &RightPanelMode::Diff), None);
     }
 
     #[test]
