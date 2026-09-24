@@ -43,6 +43,7 @@ pub(super) fn command() -> Command {
         .subcommand(notification_command())
         .subcommand(right_panel_command())
         .subcommand(jira_command())
+        .subcommand(diff_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
@@ -331,6 +332,12 @@ fn right_panel_command() -> Command {
 fn jira_command() -> Command {
     Command::new("jira")
         .about("Browse and update your Jira issues (runs in the right panel's jira tab)")
+}
+
+fn diff_command() -> Command {
+    Command::new("diff").about(
+        "Review changes of every repo the pane's Claude session touched (runs in the right panel's diff tab)",
+    )
 }
 
 fn agent_command() -> Command {

@@ -460,6 +460,7 @@ impl App {
                 cwd: session.cwd,
                 context: session.context,
                 worktree_path: session.worktree_path,
+                repos: session.repos,
                 updated_at_ms: session.updated_at_ms,
             })
             .collect();
@@ -690,6 +691,7 @@ mod tests {
                 cwd: cwd.display().to_string(),
                 context: String::new(),
                 worktree_path: None,
+                repos: Vec::new(),
                 updated_at_ms: 0,
             });
     }

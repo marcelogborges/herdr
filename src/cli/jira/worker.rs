@@ -442,6 +442,7 @@ pub(crate) mod tests {
                 cwd: String::new(),
                 context: "VK25-1".into(),
                 worktree_path: None,
+                repos: Vec::new(),
                 updated_at_ms: 0,
                 pane_id: Some("w1:p7".into()),
             }],
@@ -480,6 +481,7 @@ pub(crate) mod tests {
             cwd: "/r/vakinha-api-worktrees/VK25-1".into(),
             context: String::new(),
             worktree_path: None,
+            repos: Vec::new(),
             updated_at_ms: 1,
             pane_id: Some("w1:p7".into()),
         };

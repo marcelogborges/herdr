@@ -1078,6 +1078,7 @@ pub(crate) mod tests {
                 cwd: String::new(),
                 context: "VK25-3".into(),
                 worktree_path: None,
+                repos: Vec::new(),
                 updated_at_ms: 1,
                 pane_id: Some("w1:p1".into()),
             }],

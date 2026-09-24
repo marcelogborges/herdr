@@ -237,7 +237,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Right files/diff/jira panel (prefix+i). Commands run in the focused agent's worktree.
 # [right_panel]
 # files_command = "yazi"
-# diff_command = "lazygit"
+# diff_command = '"$HERDR_BIN_PATH" diff'  # or "lazygit"
 # open_command = "micro +{line} {path}; exec yazi {path}"
 # jira_command = '"$HERDR_BIN_PATH" jira'
 

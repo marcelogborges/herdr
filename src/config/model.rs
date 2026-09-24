@@ -944,7 +944,7 @@ impl<'de> Deserialize<'de> for PaneBordersConfig {
 pub struct RightPanelConfig {
     /// Command the right panel runs in files mode. Default: "yazi".
     pub files_command: String,
-    /// Command the right panel runs in diff mode. Default: "lazygit".
+    /// Command the right panel runs in diff mode. Default: `"$HERDR_BIN_PATH" diff`.
     pub diff_command: String,
     /// Command `right_panel.open` runs for a file; {path}, {dir}, and {line} are substituted.
     pub open_command: String,
@@ -958,7 +958,7 @@ impl Default for RightPanelConfig {
     fn default() -> Self {
         Self {
             files_command: "yazi".to_owned(),
-            diff_command: "lazygit".to_owned(),
+            diff_command: DEFAULT_RIGHT_PANEL_DIFF_COMMAND.to_owned(),
             open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
             jira_command: DEFAULT_RIGHT_PANEL_JIRA_COMMAND.to_owned(),
         }
@@ -966,6 +966,8 @@ impl Default for RightPanelConfig {
 }
 
 pub const DEFAULT_RIGHT_PANEL_JIRA_COMMAND: &str = "\"$HERDR_BIN_PATH\" jira";
+
+pub const DEFAULT_RIGHT_PANEL_DIFF_COMMAND: &str = "\"$HERDR_BIN_PATH\" diff";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
