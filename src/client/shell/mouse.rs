@@ -2434,7 +2434,13 @@ impl ClientShellState {
         else {
             return false;
         };
-        let Some((mode, _)) = crate::right_panel::header_tabs(panel)
+        let custom_labels = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| snapshot.right_panel_tabs.as_slice())
+            .unwrap_or_default();
+        let modes = crate::right_panel::header_modes(custom_labels);
+        let Some((mode, _)) = crate::right_panel::header_tabs(panel, &modes)
             .into_iter()
             .find(|(_, rect)| super::contains(*rect, point))
         else {

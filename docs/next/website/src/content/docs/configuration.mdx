@@ -138,6 +138,29 @@ returns to `right_panel_width`. The dragged width lasts until the server
 restarts. Quitting the panel command closes that terminal and hides that
 pane's panel, and closing a pane closes its panel terminals.
 
+Add your own tabs with `[[right_panel.tabs]]`. They appear after `files`,
+`diff`, and `jira` in the header, take part in `alt+q`/`alt+e` cycling and
+header clicks, and keep one terminal per pane like the built-in tabs:
+
+```toml
+[[right_panel.tabs]]
+label = "rails c"
+command = "~/bin/rails-console"
+
+[[right_panel.tabs]]
+label = "logs"
+command = "tail -f log/development.log"
+```
+
+Each command runs through `/bin/sh -c`, so `~` and `$VARS` expand as in a
+shell. Tabs with an empty label or command, a duplicate label, or a label that
+matches a built-in tab are reported by `herdr config check` and skipped.
+Reloading the config adds and removes tabs live; a pane showing a removed tab
+falls back to `files`. `right_panel.show` accepts a custom tab's label as its
+`mode`. Every panel command receives `HERDR_PANEL_OWNER_PANE_ID` and
+`HERDR_SESSION_REPOS`, the newline-separated repositories the owner pane's
+Claude Code session has touched, most recent first (empty when there is none).
+
 The `jira` tab runs `herdr jira`, an interactive board for your Jira Cloud
 issues. Configure the site, account, and project, and export the API token in
 the environment the Herdr server starts from:

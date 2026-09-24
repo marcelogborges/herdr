@@ -53,7 +53,7 @@ pub(crate) use self::{
 
 pub(crate) use self::{
     keybinds::CommandKeybindType,
-    model::{JiraConfig, KeysConfig, RightPanelConfig},
+    model::{JiraConfig, KeysConfig, RightPanelConfig, RightPanelTabConfig},
 };
 
 pub const CONFIG_PATH_ENV_VAR: &str = "HERDR_CONFIG_PATH";
@@ -121,6 +121,7 @@ impl Config {
             .chain(keybind_diags)
             .chain(self.remote_image_paste_key().err())
             .chain(self.theme.diagnostics())
+            .chain(self.right_panel.diagnostics())
             .chain(self.ui.sound.diagnostics())
             .chain(tab_bar_right_diagnostics(&self.ui.tab_bar_right))
             .chain(window_title_diagnostics(&self.ui.window_title))

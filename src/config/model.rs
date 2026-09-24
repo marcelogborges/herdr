@@ -950,6 +950,53 @@ pub struct RightPanelConfig {
     pub open_command: String,
     /// Command the right panel runs in jira mode. Default: `"$HERDR_BIN_PATH" jira`.
     pub jira_command: String,
+    pub tabs: Vec<RightPanelTabConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RightPanelTabConfig {
+    pub label: String,
+    pub command: String,
+}
+
+impl RightPanelConfig {
+    pub(crate) fn resolved_tabs(&self) -> (Vec<RightPanelTabConfig>, Vec<String>) {
+        let mut tabs: Vec<RightPanelTabConfig> = Vec::new();
+        let mut diagnostics = Vec::new();
+        for (index, tab) in self.tabs.iter().enumerate() {
+            let label = tab.label.trim();
+            let command = tab.command.trim();
+            let problem = if label.is_empty() {
+                Some("has an empty label".to_owned())
+            } else if command.is_empty() {
+                Some(format!("{label:?} has an empty command"))
+            } else if crate::right_panel::RightPanelMode::BUILTIN
+                .iter()
+                .any(|mode| mode.label() == label)
+            {
+                Some(format!("{label:?} clashes with a built-in tab"))
+            } else if tabs.iter().any(|existing| existing.label == label) {
+                Some(format!("{label:?} is a duplicate label"))
+            } else {
+                None
+            };
+            match problem {
+                Some(problem) => {
+                    diagnostics.push(format!("right_panel.tabs[{index}] {problem}; ignoring tab"))
+                }
+                None => tabs.push(RightPanelTabConfig {
+                    label: label.to_owned(),
+                    command: command.to_owned(),
+                }),
+            }
+        }
+        (tabs, diagnostics)
+    }
+
+    pub(crate) fn diagnostics(&self) -> Vec<String> {
+        self.resolved_tabs().1
+    }
 }
 
 pub const DEFAULT_RIGHT_PANEL_OPEN_COMMAND: &str = "micro +{line} {path}; exec yazi {path}";
@@ -961,6 +1008,7 @@ impl Default for RightPanelConfig {
             diff_command: DEFAULT_RIGHT_PANEL_DIFF_COMMAND.to_owned(),
             open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
             jira_command: DEFAULT_RIGHT_PANEL_JIRA_COMMAND.to_owned(),
+            tabs: Vec::new(),
         }
     }
 }

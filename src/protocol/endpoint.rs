@@ -243,6 +243,7 @@ mod tests {
             agents: Vec::new(),
             commands: Vec::new(),
             claude_sessions: Vec::new(),
+            right_panel_tabs: Vec::new(),
         }
     }
 

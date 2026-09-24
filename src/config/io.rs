@@ -395,6 +395,7 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
     );
 
     diagnostics.extend(config.theme.diagnostics());
+    diagnostics.extend(config.right_panel.diagnostics());
 
     Ok(LoadedConfig {
         config,
@@ -915,6 +916,64 @@ resume_agents_on_restore = true
 
         assert!(loaded.config.session.resume_agents_on_restore);
         assert!(loaded.diagnostics.is_empty());
+        assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_keeps_valid_right_panel_tabs_and_reports_the_rest() {
+        let loaded = load_live_config_from_str(
+            r#"
+[[right_panel.tabs]]
+label = "rails c"
+command = "~/bin/rails-c"
+
+[[right_panel.tabs]]
+label = ""
+command = "x"
+
+[[right_panel.tabs]]
+label = "blank"
+command = "  "
+
+[[right_panel.tabs]]
+label = "diff"
+command = "lazygit"
+
+[[right_panel.tabs]]
+label = " rails c "
+command = "other"
+
+[[right_panel.tabs]]
+label = "awsx"
+command = "awsx"
+"#,
+        )
+        .unwrap();
+
+        let (tabs, diagnostics) = loaded.config.right_panel.resolved_tabs();
+        assert_eq!(
+            tabs,
+            vec![
+                super::super::RightPanelTabConfig {
+                    label: "rails c".into(),
+                    command: "~/bin/rails-c".into(),
+                },
+                super::super::RightPanelTabConfig {
+                    label: "awsx".into(),
+                    command: "awsx".into(),
+                },
+            ]
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                "right_panel.tabs[1] has an empty label; ignoring tab",
+                "right_panel.tabs[2] \"blank\" has an empty command; ignoring tab",
+                "right_panel.tabs[3] \"diff\" clashes with a built-in tab; ignoring tab",
+                "right_panel.tabs[4] \"rails c\" is a duplicate label; ignoring tab",
+            ]
+        );
+        assert_eq!(loaded.diagnostics, diagnostics);
         assert!(loaded.invalid_sections.is_empty());
     }
 

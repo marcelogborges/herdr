@@ -3976,12 +3976,20 @@
           "type": "object"
         },
         "RightPanelMode": {
-          "enum": [
-            "files",
-            "diff",
-            "jira"
-          ],
-          "type": "string"
+          "anyOf": [
+            {
+              "enum": [
+                "files",
+                "diff",
+                "jira"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "Label of a [[right_panel.tabs]] entry.",
+              "type": "string"
+            }
+          ]
         },
         "RightPanelOpenParams": {
           "properties": {

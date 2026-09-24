@@ -316,7 +316,7 @@ mod tests {
         );
         assert_eq!(
             actual.remove("right_panel.show").as_deref(),
-            Some("131bd8e56dc0fadf44b25824dc0ad3975e6e32464674c907a8162408b98454e4")
+            Some("442775ee8161dc5ff9fb2d405eeb82b577f7fca363c1fd418b40585a1b65d6ba")
         );
         assert_eq!(
             actual.remove("right_panel.toggle").as_deref(),
