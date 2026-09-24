@@ -95,6 +95,36 @@ pub(crate) struct IssueDetail {
     pub story_points: Option<f64>,
     pub development: Option<String>,
     pub pull_requests: Vec<PullRequest>,
+    pub worktrees: Vec<Worktree>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Worktree {
+    pub repo: String,
+    pub name: String,
+    pub path: String,
+    pub branch: Option<String>,
+}
+
+impl Worktree {
+    pub(crate) fn pull_request<'a>(
+        &self,
+        pull_requests: &'a [PullRequest],
+    ) -> Option<&'a PullRequest> {
+        let branch = self.branch.as_deref()?;
+        let same_repo = |repository: &str| {
+            repository.is_empty()
+                || repository == self.repo
+                || repository.ends_with(&format!("/{}", self.repo))
+        };
+        pull_requests
+            .iter()
+            .filter(|pull_request| {
+                pull_request.branch.as_deref() == Some(branch)
+                    && same_repo(&pull_request.repository)
+            })
+            .min_by_key(|pull_request| !pull_request.status.eq_ignore_ascii_case("open"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,9 +133,17 @@ pub(crate) struct PullRequest {
     pub title: String,
     pub url: String,
     pub repository: String,
+    pub branch: Option<String>,
 }
 
 impl PullRequest {
+    pub(crate) fn number(&self) -> Option<&str> {
+        self.url
+            .rsplit('/')
+            .next()
+            .filter(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
+    }
+
     pub(crate) fn label(&self) -> String {
         let number = self.url.rsplit('/').next().unwrap_or_default();
         if self.repository.is_empty() || number.is_empty() {
@@ -116,10 +154,10 @@ impl PullRequest {
     }
 }
 
-pub(crate) fn pull_request_instance_types(summary: &Value) -> Vec<String> {
+pub(crate) fn instance_types(summary: &Value, kind: &str) -> Vec<String> {
     summary
         .get("summary")
-        .and_then(|summary| summary.get("pullrequest"))
+        .and_then(|summary| summary.get(kind))
         .and_then(|pr| pr.get("byInstanceType"))
         .and_then(Value::as_object)
         .map(|types| types.keys().cloned().collect())
@@ -140,8 +178,21 @@ pub(crate) fn pull_requests_from_detail(detail: &Value) -> Vec<PullRequest> {
                 title: str_at(pr, &["name"]).unwrap_or_default(),
                 url: str_at(pr, &["url"])?,
                 repository: str_at(pr, &["repositoryName"]).unwrap_or_default(),
+                branch: str_at(pr, &["source", "branch"]),
             })
         })
+        .collect()
+}
+
+pub(crate) fn repository_names(detail: &Value) -> Vec<String> {
+    detail
+        .get("detail")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("repositories").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|repository| str_at(repository, &["name"]))
         .collect()
 }
 
@@ -165,8 +216,9 @@ impl IssueDetail {
             story_points: fields.get(&fields_ids.story_points).and_then(Value::as_f64),
             development: fields
                 .get(&fields_ids.development)
-                .and_then(development_summary),
+                .and_then(cached_development_summary),
             pull_requests: Vec::new(),
+            worktrees: Vec::new(),
         })
     }
 }
@@ -180,31 +232,48 @@ fn sprint_name(value: &Value) -> Option<String> {
     str_at(active, &["name"])
 }
 
-fn development_summary(value: &Value) -> Option<String> {
+fn cached_development_summary(value: &Value) -> Option<String> {
     let text = value.as_str()?;
     let json_start = text.find("json=")? + "json=".len();
     let json_text = text.get(json_start..)?.trim_end().strip_suffix('}')?;
     let parsed: Value = serde_json::from_str(json_text).ok()?;
-    let summary = parsed.get("cachedValue")?.get("summary")?;
-    let parts = [
-        ("pullrequest", "PR", "PRs"),
-        ("branch", "branch", "branches"),
-        ("commit", "commit", "commits"),
-        ("repository", "repositório", "repositórios"),
-    ]
-    .into_iter()
-    .filter_map(|(kind, singular, plural)| {
+    development_label(parsed.get("cachedValue")?.get("summary")?, None)
+}
+
+fn plural(count: u64, singular: &str, plural: &str) -> String {
+    format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
+pub(crate) fn development_label(summary: &Value, repositories: Option<usize>) -> Option<String> {
+    let overall = |kind: &str| {
         let overall = summary.get(kind)?.get("overall")?;
         let count = overall.get("count")?.as_u64().filter(|count| *count > 0)?;
-        let noun = if count == 1 { singular } else { plural };
+        Some((count, overall))
+    };
+    let mut parts = Vec::new();
+    if let Some((count, overall)) = overall("pullrequest") {
         let state = overall
             .get("state")
             .and_then(Value::as_str)
             .map(|state| format!(" ({})", state.to_lowercase()))
             .unwrap_or_default();
-        Some(format!("{count} {noun}{state}"))
-    })
-    .collect::<Vec<_>>();
+        parts.push(format!("{}{state}", plural(count, "PR", "PRs")));
+    }
+    if let Some((count, _)) = overall("branch") {
+        parts.push(plural(count, "branch", "branches"));
+    }
+    if let Some((count, _)) = overall("repository").or_else(|| overall("commit")) {
+        let commits = plural(count, "commit", "commits");
+        parts.push(
+            match repositories.filter(|repositories| *repositories > 0) {
+                Some(repositories) => format!(
+                    "{commits} em {}",
+                    plural(repositories as u64, "repositório", "repositórios")
+                ),
+                None => commits,
+            },
+        );
+    }
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
@@ -386,7 +455,7 @@ mod tests {
         assert_eq!(detail.story_points, Some(3.0));
         assert_eq!(
             detail.development.as_deref(),
-            Some("2 PRs (open) · 1 repositório")
+            Some("2 PRs (open) · 1 commit")
         );
         assert_eq!(detail.comments[0].author, "Ana");
         assert_eq!(detail.issue.parent, Some(("VK25-1".into(), "pai".into())));
@@ -421,17 +490,112 @@ mod tests {
     fn pull_requests_come_from_dev_status_summary_and_detail() {
         let summary = serde_json::json!({"summary": {"pullrequest": {"byInstanceType": {"oAuth-com.github.integration.production": {}}}}});
         assert_eq!(
-            pull_request_instance_types(&summary),
+            instance_types(&summary, "pullrequest"),
             ["oAuth-com.github.integration.production"]
         );
         let detail = serde_json::json!({"detail": [{"pullRequests": [
-            {"status": "OPEN", "name": "VK25-1: x", "url": "https://github.com/vakinha/vakinha-web/pull/5783", "repositoryName": "vakinha/vakinha-web"},
+            {"status": "OPEN", "name": "VK25-1: x", "url": "https://github.com/vakinha/vakinha-web/pull/5783", "repositoryName": "vakinha/vakinha-web", "source": {"branch": "task/VK25-1/x"}},
             {"status": "MERGED", "name": "sem url"}
         ]}]});
         let prs = pull_requests_from_detail(&detail);
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].label(), "vakinha/vakinha-web#5783");
         assert_eq!(prs[0].status, "OPEN");
-        assert!(pull_request_instance_types(&serde_json::json!({})).is_empty());
+        assert_eq!(prs[0].branch.as_deref(), Some("task/VK25-1/x"));
+        assert_eq!(prs[0].number(), Some("5783"));
+        assert!(instance_types(&serde_json::json!({}), "pullrequest").is_empty());
+    }
+
+    #[test]
+    fn development_label_counts_commits_and_repositories() {
+        let summary = serde_json::json!({
+            "pullrequest": {"overall": {"count": 1, "state": "MERGED"}},
+            "branch": {"overall": {"count": 0}},
+            "repository": {"overall": {"count": 5}}
+        });
+        assert_eq!(
+            development_label(&summary, Some(1)).as_deref(),
+            Some("1 PR (merged) · 5 commits em 1 repositório")
+        );
+        assert_eq!(
+            development_label(&summary, None).as_deref(),
+            Some("1 PR (merged) · 5 commits")
+        );
+        let many = serde_json::json!({
+            "pullrequest": {"overall": {"count": 3, "state": "OPEN"}},
+            "branch": {"overall": {"count": 2}},
+            "repository": {"overall": {"count": 1}}
+        });
+        assert_eq!(
+            development_label(&many, Some(2)).as_deref(),
+            Some("3 PRs (open) · 2 branches · 1 commit em 2 repositórios")
+        );
+        let branch_only = serde_json::json!({"branch": {"overall": {"count": 1}}});
+        assert_eq!(
+            development_label(&branch_only, Some(0)).as_deref(),
+            Some("1 branch")
+        );
+        assert_eq!(development_label(&serde_json::json!({}), None), None);
+        assert!(!development_label(&summary, Some(3))
+            .unwrap()
+            .contains("5 repositórios"));
+    }
+
+    #[test]
+    fn repository_names_come_from_dev_status_repository_detail() {
+        let detail = serde_json::json!({"detail": [{"repositories": [
+            {"name": "vakinha/vakinha-web", "commits": [{}, {}]},
+            {"name": "vakinha/vakinha-api"}
+        ]}]});
+        assert_eq!(
+            repository_names(&detail),
+            ["vakinha/vakinha-web", "vakinha/vakinha-api"]
+        );
+    }
+
+    #[test]
+    fn worktree_matches_pull_request_by_exact_source_branch() {
+        let pull_request = |branch: &str| PullRequest {
+            status: "OPEN".into(),
+            title: String::new(),
+            url: "https://github.com/v/api/pull/12".into(),
+            repository: "v/api".into(),
+            branch: Some(branch.into()),
+        };
+        let prs = [pull_request("task/VK25-1/a"), pull_request("task/VK25-1/b")];
+        let other_repo = PullRequest {
+            repository: "v/admin-api".into(),
+            url: "https://github.com/v/admin-api/pull/9".into(),
+            ..pull_request("task/VK25-1/b")
+        };
+        let declined = PullRequest {
+            status: "DECLINED".into(),
+            url: "https://github.com/v/api/pull/11".into(),
+            ..pull_request("task/VK25-1/b")
+        };
+        let mixed = [declined, other_repo.clone(), pull_request("task/VK25-1/b")];
+        let worktree = |branch: Option<&str>| Worktree {
+            repo: "api".into(),
+            name: "VK25-1".into(),
+            path: "/r/api-worktrees/VK25-1".into(),
+            branch: branch.map(str::to_owned),
+        };
+        assert_eq!(
+            worktree(Some("task/VK25-1/b")).pull_request(&prs),
+            Some(&prs[1])
+        );
+        assert_eq!(worktree(Some("task/VK25-1")).pull_request(&prs), None);
+        assert_eq!(
+            worktree(Some("task/VK25-1/b"))
+                .pull_request(&mixed)
+                .and_then(PullRequest::number),
+            Some("12")
+        );
+        let admin = Worktree {
+            repo: "admin-api".into(),
+            ..worktree(Some("task/VK25-1/b"))
+        };
+        assert_eq!(admin.pull_request(&mixed), Some(&other_repo));
+        assert_eq!(worktree(None).pull_request(&prs), None);
     }
 }

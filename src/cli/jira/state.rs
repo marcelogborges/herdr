@@ -41,9 +41,17 @@ impl Action {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum DetailSection {
+    PullRequests,
+    Worktrees,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Hit {
     Row(usize),
+    Section(DetailSection),
+    Worktree(usize),
     Dot(String),
     Button(Action),
     MenuItem(usize),
@@ -117,6 +125,7 @@ pub(crate) struct JiraState {
     pub rows: Vec<Row>,
     pub collapsed: HashSet<String>,
     pub seen_groups: HashSet<String>,
+    pub collapsed_sections: HashSet<DetailSection>,
     pub selection: Option<Selection>,
     pub scroll: usize,
     pub links: HashMap<String, LinkedSession>,
@@ -152,6 +161,7 @@ impl JiraState {
             rows: Vec::new(),
             collapsed: HashSet::new(),
             seen_groups: HashSet::new(),
+            collapsed_sections: HashSet::new(),
             selection: None,
             scroll: 0,
             links: HashMap::new(),
@@ -298,6 +308,27 @@ impl JiraState {
         }
         let max = self.rows.len().saturating_sub(height);
         self.scroll = self.scroll.min(max);
+    }
+
+    pub(crate) fn toggle_section(&mut self, section: DetailSection) {
+        if !self.collapsed_sections.remove(&section) {
+            self.collapsed_sections.insert(section);
+        }
+    }
+
+    fn open_worktree(&self, index: usize) -> Option<Job> {
+        let View::Detail {
+            detail: Some(detail),
+            ..
+        } = &self.view
+        else {
+            return None;
+        };
+        let worktree = detail.worktrees.get(index)?;
+        Some(Job::OpenWorktree {
+            path: worktree.path.clone(),
+            name: worktree.name.clone(),
+        })
     }
 
     fn toggle_group(&mut self, status: &str) {
@@ -697,6 +728,8 @@ impl JiraState {
         let mut effects = Effects::default();
         match &mut self.view {
             View::Detail { scroll, .. } => match key.code {
+                KeyCode::Char('p') => self.toggle_section(DetailSection::PullRequests),
+                KeyCode::Char('t') => self.toggle_section(DetailSection::Worktrees),
                 KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('q') | KeyCode::Left => {
                     return self.action(Action::Back)
                 }
@@ -839,6 +872,8 @@ impl JiraState {
                 return self.apply_transition(index);
             }
             Hit::PopupArea => {}
+            Hit::Section(section) => self.toggle_section(section),
+            Hit::Worktree(index) => effects.jobs.extend(self.open_worktree(index)),
             Hit::Link(url) => effects.jobs.push(Job::OpenUrl(url)),
             Hit::Dot(key) => {
                 self.selection = Some(Selection::Issue(key));

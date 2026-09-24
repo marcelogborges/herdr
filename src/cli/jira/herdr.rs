@@ -9,7 +9,7 @@ use crate::api::schema::{
     TabCreateParams,
 };
 
-use super::model::key_matches;
+use super::model::{key_matches, Worktree};
 
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -223,6 +223,10 @@ pub(crate) fn expand_home(path: &str) -> PathBuf {
 }
 
 pub(crate) fn find_worktree(roots: &[String], key: &str) -> Option<PathBuf> {
+    find_worktrees(roots, key).into_iter().next()
+}
+
+pub(crate) fn find_worktrees(roots: &[String], key: &str) -> Vec<PathBuf> {
     let mut matches = Vec::new();
     for root in roots {
         let root = expand_home(root);
@@ -251,7 +255,62 @@ pub(crate) fn find_worktree(roots: &[String], key: &str) -> Option<PathBuf> {
         }
     }
     matches.sort();
-    matches.into_iter().next()
+    matches.dedup();
+    matches
+}
+
+pub(crate) fn worktree_info(path: &Path) -> Worktree {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    let repo = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| name.strip_suffix("-worktrees").unwrap_or(name).to_owned())
+        .unwrap_or_default();
+    Worktree {
+        repo,
+        name,
+        path: path.to_string_lossy().into_owned(),
+        branch: git_branch(path),
+    }
+}
+
+pub(crate) fn git_branch(path: &Path) -> Option<String> {
+    let dot_git = path.join(".git");
+    let git_dir = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let pointer = std::fs::read_to_string(&dot_git).ok()?;
+        let target = pointer.trim().strip_prefix("gitdir:")?.trim();
+        let target = Path::new(target);
+        if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            path.join(target)
+        }
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    head.trim()
+        .strip_prefix("ref: refs/heads/")
+        .map(str::to_owned)
+}
+
+pub(crate) fn session_in_worktree<'a>(
+    sessions: &'a [ClaudeSessionInfo],
+    worktree: &Path,
+) -> Option<&'a ClaudeSessionInfo> {
+    let inside = |path: &str| Path::new(path).starts_with(worktree);
+    sessions
+        .iter()
+        .filter(|session| session.pane_id.is_some())
+        .filter(|session| {
+            session.worktree_path.as_deref().is_some_and(inside) || inside(&session.cwd)
+        })
+        .max_by_key(|session| session.updated_at_ms)
 }
 
 #[cfg(test)]
@@ -332,5 +391,57 @@ mod tests {
         );
         assert_eq!(find_worktree(&roots, "VK25-2727"), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn find_worktrees_lists_every_repo_and_reads_branches() {
+        let root = std::env::temp_dir().join(format!("herdr-jira-wts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let main_git = root.join("vakinha-api/.git/worktrees/VK25-2907");
+        std::fs::create_dir_all(&main_git).unwrap();
+        std::fs::write(
+            main_git.join("HEAD"),
+            "ref: refs/heads/task/VK25-2907/pack\n",
+        )
+        .unwrap();
+        let api = root.join("vakinha-api-worktrees/VK25-2907");
+        std::fs::create_dir_all(&api).unwrap();
+        std::fs::write(
+            api.join(".git"),
+            format!("gitdir: {}\n", main_git.display()),
+        )
+        .unwrap();
+        let admin = root.join("vakinha-admin-api-worktrees/VK25-2907");
+        std::fs::create_dir_all(admin.join(".git")).unwrap();
+        std::fs::write(admin.join(".git/HEAD"), "0123abcd\n").unwrap();
+        std::fs::create_dir_all(root.join("vakinha-web-worktrees/VK25-29070")).unwrap();
+        let roots = vec![root.to_string_lossy().into_owned()];
+
+        let found = find_worktrees(&roots, "VK25-2907");
+        assert_eq!(found, [admin.clone(), api.clone()]);
+        let infos: Vec<Worktree> = found.iter().map(|path| worktree_info(path)).collect();
+        assert_eq!(infos[0].repo, "vakinha-admin-api");
+        assert_eq!(infos[0].name, "VK25-2907");
+        assert_eq!(infos[0].branch, None);
+        assert_eq!(infos[1].repo, "vakinha-api");
+        assert_eq!(infos[1].branch.as_deref(), Some("task/VK25-2907/pack"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn session_in_worktree_prefers_live_recent_sessions_inside_it() {
+        let mut inside_cwd = session("a", "x", Some("w1:p1"), 1);
+        inside_cwd.cwd = "/r/vakinha-api-worktrees/VK25-1/src".into();
+        let mut by_worktree = session("b", "x", Some("w1:p2"), 5);
+        by_worktree.worktree_path = Some("/r/vakinha-api-worktrees/VK25-1".into());
+        let mut closed = session("c", "x", None, 9);
+        closed.worktree_path = Some("/r/vakinha-api-worktrees/VK25-1".into());
+        let mut elsewhere = session("d", "x", Some("w1:p3"), 20);
+        elsewhere.cwd = "/r/vakinha-api-worktrees/VK25-10".into();
+        let sessions = [inside_cwd, by_worktree, closed, elsewhere];
+
+        let found = session_in_worktree(&sessions, Path::new("/r/vakinha-api-worktrees/VK25-1"));
+        assert_eq!(found.map(|session| session.session_id.as_str()), Some("b"));
+        assert!(session_in_worktree(&sessions, Path::new("/r/other")).is_none());
     }
 }

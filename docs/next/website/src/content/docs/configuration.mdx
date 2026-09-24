@@ -159,7 +159,13 @@ comments, `a` assigns it to you, `o` opens it in the browser, `w` focuses its
 session (resuming a closed one in a new tab, or opening a tab in a matching
 `<repo>-worktrees/<KEY>` checkout under `worktree_roots`), and `r` refreshes.
 Enter or a double click opens the detail view with the description, comments,
-sprint, story points, and pull request summary. The list refreshes in the
+sprint, story points, and a live development summary. Two collapsible sections
+follow the fields: pull requests (status and a clickable link, toggled with `p`)
+and worktrees (every `<repo>-worktrees/<KEY>*` checkout under `worktree_roots`
+with its branch and the pull request opened from it, toggled with `t`). Clicking
+a worktree focuses the Claude Code session running in it or opens a new tab
+there. Groups start collapsed except the one holding the preselected issue. The
+list refreshes in the
 background every `refresh_seconds`. Transitions that require extra fields open
 the issue in the browser instead.
 

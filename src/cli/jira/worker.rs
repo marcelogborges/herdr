@@ -4,7 +4,10 @@ use std::sync::mpsc::{Receiver, Sender};
 use crate::api::schema::ClaudeSessionInfo;
 
 use super::api::JiraApi;
-use super::herdr::{find_worktree, HerdrBridge, LinkedSession, PaneContext};
+use super::herdr::{
+    find_worktree, find_worktrees, session_in_worktree, worktree_info, HerdrBridge, LinkedSession,
+    PaneContext,
+};
 use super::model::{Comment, Issue, IssueDetail, Transition};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +30,10 @@ pub(crate) enum Job {
         link: Option<LinkedSession>,
     },
     OpenUrl(String),
+    OpenWorktree {
+        path: String,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,7 +134,13 @@ impl Worker {
                 Err(err) => Outcome::ListFailed(err.to_string()),
             },
             Job::Detail(key) => match api.issue_detail(&key) {
-                Ok(detail) => Outcome::Detail(Box::new(detail)),
+                Ok(mut detail) => {
+                    detail.worktrees = find_worktrees(&self.context.worktree_roots, &key)
+                        .iter()
+                        .map(|path| worktree_info(path))
+                        .collect();
+                    Outcome::Detail(Box::new(detail))
+                }
                 Err(err) => Outcome::DetailFailed {
                     key,
                     error: err.to_string(),
@@ -168,10 +181,36 @@ impl Worker {
                 }
             }
             Job::Session { key, link } => self.open_session(&key, link),
+            Job::OpenWorktree { path, name } => self.open_worktree(&path, &name),
             Job::OpenUrl(url) => match open_url(&self.context.browser_command, &url) {
                 Ok(()) => Outcome::Notice(format!("abrindo {url}")),
                 Err(err) => Outcome::Failed(format!("não foi possível abrir o browser: {err}")),
             },
+        }
+    }
+
+    fn owner_workspace(&self) -> Option<String> {
+        self.context
+            .owner_pane
+            .as_deref()
+            .and_then(|pane| self.context.bridge.pane(pane).ok())
+            .and_then(|(context, _)| context.workspace_id)
+    }
+
+    fn open_worktree(&self, path: &str, name: &str) -> Outcome {
+        let bridge = &self.context.bridge;
+        let sessions = bridge.sessions().unwrap_or_default();
+        if let Some(pane) = session_in_worktree(&sessions, std::path::Path::new(path))
+            .and_then(|session| session.pane_id.as_deref())
+        {
+            return match bridge.focus_pane(pane) {
+                Ok(()) => Outcome::Notice(format!("{name}: sessão focada")),
+                Err(err) => Outcome::Failed(format!("não foi possível focar a sessão: {err}")),
+            };
+        }
+        match bridge.create_tab(self.owner_workspace(), std::path::Path::new(path), name) {
+            Ok(()) => Outcome::Notice(format!("{name}: tab aberta em {path}")),
+            Err(err) => Outcome::Failed(format!("não foi possível abrir a tab: {err}")),
         }
     }
 
@@ -397,5 +436,45 @@ pub(crate) mod tests {
         assert_eq!(owner.workspace_id.as_deref(), Some("w1"));
         assert_eq!(pane_status["w1:p7"], "working");
         assert_eq!(sessions.len(), 1);
+    }
+
+    #[test]
+    fn open_worktree_focuses_a_live_session_or_opens_a_tab() {
+        let mut live = ClaudeSessionInfo {
+            session_id: "s1".into(),
+            title: String::new(),
+            cwd: "/r/vakinha-api-worktrees/VK25-1".into(),
+            context: String::new(),
+            worktree_path: None,
+            updated_at_ms: 1,
+            pane_id: Some("w1:p7".into()),
+        };
+        let bridge = FakeBridge {
+            sessions: vec![live.clone()],
+            ..FakeBridge::default()
+        };
+        let calls = bridge.calls.clone();
+        let mut worker = worker_with(bridge, Vec::new());
+        worker.handle(Job::OpenWorktree {
+            path: "/r/vakinha-api-worktrees/VK25-1".into(),
+            name: "VK25-1".into(),
+        });
+        assert_eq!(calls.lock().unwrap().as_slice(), ["focus w1:p7"]);
+
+        live.pane_id = None;
+        let bridge = FakeBridge {
+            sessions: vec![live],
+            ..FakeBridge::default()
+        };
+        let calls = bridge.calls.clone();
+        let mut worker = worker_with(bridge, Vec::new());
+        worker.handle(Job::OpenWorktree {
+            path: "/r/vakinha-api-worktrees/VK25-1".into(),
+            name: "VK25-1".into(),
+        });
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            ["tab w1 /r/vakinha-api-worktrees/VK25-1 VK25-1"]
+        );
     }
 }

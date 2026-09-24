@@ -5,8 +5,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::model::{
-    pull_request_instance_types, pull_requests_from_detail, Comment, Issue, IssueDetail,
-    PullRequest, Transition,
+    development_label, instance_types, pull_requests_from_detail, repository_names, Comment, Issue,
+    IssueDetail, Transition,
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -120,31 +120,49 @@ impl JiraApi {
         let mut detail = IssueDetail::from_json(&value, &self.fields)
             .ok_or_else(|| JiraError::Parse(format!("issue {key} incompleta")))?;
         if let Some(issue_id) = value.get("id").and_then(Value::as_str) {
-            detail.pull_requests = self.pull_requests(issue_id);
+            self.apply_dev_status(issue_id, &mut detail);
         }
         Ok(detail)
     }
 
-    fn pull_requests(&self, issue_id: &str) -> Vec<PullRequest> {
+    fn apply_dev_status(&self, issue_id: &str, detail: &mut IssueDetail) {
         let summary_path = format!(
             "/rest/dev-status/latest/issue/summary?issueId={}",
             percent_encode(issue_id)
         );
         let Ok(summary) = self.request("GET", &summary_path, None) else {
-            return Vec::new();
+            return;
         };
-        pull_request_instance_types(&summary)
-            .into_iter()
-            .filter_map(|application| {
-                let path = format!(
-                    "/rest/dev-status/latest/issue/detail?issueId={}&applicationType={}&dataType=pullrequest",
-                    percent_encode(issue_id),
-                    percent_encode(&application)
-                );
-                self.request("GET", &path, None).ok()
-            })
-            .flat_map(|detail| pull_requests_from_detail(&detail))
-            .collect()
+        let details = |kind: &str, data_type: &str| -> Vec<Value> {
+            instance_types(&summary, kind)
+                .into_iter()
+                .filter_map(|application| {
+                    let path = format!(
+                        "/rest/dev-status/latest/issue/detail?issueId={}&applicationType={}&dataType={data_type}",
+                        percent_encode(issue_id),
+                        percent_encode(&application)
+                    );
+                    self.request("GET", &path, None).ok()
+                })
+                .collect()
+        };
+        detail.pull_requests = details("pullrequest", "pullrequest")
+            .iter()
+            .flat_map(pull_requests_from_detail)
+            .collect();
+        let mut repositories: Vec<String> = details("repository", "repository")
+            .iter()
+            .flat_map(repository_names)
+            .collect();
+        repositories.sort();
+        repositories.dedup();
+        let repository_count = (!repositories.is_empty()).then_some(repositories.len());
+        if let Some(label) = summary
+            .get("summary")
+            .and_then(|summary| development_label(summary, repository_count))
+        {
+            detail.development = Some(label);
+        }
     }
 
     pub(crate) fn transitions(&self, key: &str) -> Result<Vec<Transition>, JiraError> {
@@ -551,5 +569,50 @@ pub(crate) mod tests {
         assert_eq!(percent_encode("VK25-1_a.b~"), "VK25-1_a.b~");
         assert_eq!(percent_encode("a b=\"c\""), "a%20b%3D%22c%22");
         assert_eq!(percent_encode("ç"), "%C3%A7");
+    }
+
+    #[test]
+    fn issue_detail_uses_live_dev_status_for_pull_requests_and_development_label() {
+        let issue = r#"{"id": "77", "key": "VK25-9", "fields": {"summary": "s", "status": {"name": "Code Review", "statusCategory": {"key": "indeterminate"}}, "issuetype": {"name": "Task"}, "customfield_10000": "{json={\"cachedValue\":{\"summary\":{\"repository\":{\"overall\":{\"count\":5}}}}}}"}}"#;
+        let summary = r#"{"summary": {"pullrequest": {"overall": {"count": 1, "state": "MERGED"}, "byInstanceType": {"gh": {}}}, "repository": {"overall": {"count": 5}, "byInstanceType": {"gh": {}}}, "branch": {"overall": {"count": 0}}}}"#;
+        let prs = r#"{"detail": [{"pullRequests": [{"status": "MERGED", "name": "VK25-9: x", "url": "https://github.com/v/web/pull/3", "repositoryName": "v/web", "source": {"branch": "task/VK25-9/x"}}]}]}"#;
+        let repos = r#"{"detail": [{"repositories": [{"name": "v/web", "commits": [{}, {}, {}, {}, {}]}]}]}"#;
+        let mock = mock_jira(vec![
+            ("GET", "/rest/api/3/issue/VK25-9", 200, issue.into()),
+            ("GET", "/rest/dev-status/latest/issue/summary?issueId=77", 200, summary.into()),
+            (
+                "GET",
+                "/rest/dev-status/latest/issue/detail?issueId=77&applicationType=gh&dataType=pullrequest",
+                200,
+                prs.into(),
+            ),
+            (
+                "GET",
+                "/rest/dev-status/latest/issue/detail?issueId=77&applicationType=gh&dataType=repository",
+                200,
+                repos.into(),
+            ),
+        ]);
+        let detail = api_for(&mock).issue_detail("VK25-9").unwrap();
+
+        assert_eq!(
+            detail.development.as_deref(),
+            Some("1 PR (merged) · 5 commits em 1 repositório")
+        );
+        assert_eq!(detail.pull_requests.len(), 1);
+        assert_eq!(
+            detail.pull_requests[0].branch.as_deref(),
+            Some("task/VK25-9/x")
+        );
+    }
+
+    #[test]
+    fn issue_detail_falls_back_to_cached_development_when_dev_status_fails() {
+        let issue = r#"{"id": "78", "key": "VK25-8", "fields": {"summary": "s", "status": {"name": "Code Review", "statusCategory": {"key": "indeterminate"}}, "issuetype": {"name": "Task"}, "customfield_10000": "{json={\"cachedValue\":{\"summary\":{\"repository\":{\"overall\":{\"count\":5}}}}}}"}}"#;
+        let mock = mock_jira(vec![("GET", "/rest/api/3/issue/VK25-8", 200, issue.into())]);
+        let detail = api_for(&mock).issue_detail("VK25-8").unwrap();
+
+        assert_eq!(detail.development.as_deref(), Some("5 commits"));
+        assert!(detail.pull_requests.is_empty());
     }
 }

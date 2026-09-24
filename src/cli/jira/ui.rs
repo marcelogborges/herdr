@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Instant;
 
 use ratatui::layout::{Position, Rect};
@@ -9,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::adf::{self, RichLine, RichSpan, SpanStyle, WrappedSpan};
 use super::model::{priority_icon, IssueDetail, StatusCategory};
-use super::state::{Action, Hit, JiraState, Popup, Row, View};
+use super::state::{Action, DetailSection, Hit, JiraState, Popup, Row, View};
 
 pub(crate) const BLUE: Color = Color::Rgb(0x2e, 0x7d, 0xe9);
 pub(crate) const PURPLE: Color = Color::Rgb(0x98, 0x54, 0xf1);
@@ -315,6 +316,7 @@ fn render_detail(frame: &mut Frame, state: &mut JiraState, area: Rect, now: Inst
         detail.as_deref(),
         error.as_deref(),
         &state.browse_base,
+        &state.collapsed_sections,
         now,
     );
     let wrapped = adf::wrap(&lines, area.width.saturating_sub(2) as usize);
@@ -334,9 +336,7 @@ fn render_detail(frame: &mut Frame, state: &mut JiraState, area: Rect, now: Inst
             .map(|span| {
                 let width = span.text.width() as u16;
                 if let Some(url) = &span.link {
-                    state
-                        .hits
-                        .push((Rect::new(x, y, width, 1), Hit::Link(url.clone())));
+                    state.hits.push((Rect::new(x, y, width, 1), link_hit(url)));
                 }
                 x += width;
                 Span::styled(span.text.clone(), span_style(span))
@@ -349,11 +349,90 @@ fn render_detail(frame: &mut Frame, state: &mut JiraState, area: Rect, now: Inst
     }
 }
 
+const SECTION_LINK: &str = "herdr-jira:section:";
+const WORKTREE_LINK: &str = "herdr-jira:worktree:";
+
+fn section_link(section: DetailSection) -> String {
+    let name = match section {
+        DetailSection::PullRequests => "pull-requests",
+        DetailSection::Worktrees => "worktrees",
+    };
+    format!("{SECTION_LINK}{name}")
+}
+
+pub(crate) fn link_hit(link: &str) -> Hit {
+    if let Some(name) = link.strip_prefix(SECTION_LINK) {
+        match name {
+            "pull-requests" => return Hit::Section(DetailSection::PullRequests),
+            "worktrees" => return Hit::Section(DetailSection::Worktrees),
+            _ => {}
+        }
+    }
+    if let Some(index) = link
+        .strip_prefix(WORKTREE_LINK)
+        .and_then(|index| index.parse().ok())
+    {
+        return Hit::Worktree(index);
+    }
+    Hit::Link(link.to_owned())
+}
+
+fn section_header(
+    lines: &mut Vec<RichLine>,
+    section: DetailSection,
+    title: &str,
+    count: usize,
+    collapsed: &HashSet<DetailSection>,
+) -> bool {
+    let open = !collapsed.contains(&section);
+    let marker = if open { "▾" } else { "▸" };
+    let hint = match section {
+        DetailSection::PullRequests => "  p",
+        DetailSection::Worktrees => "  t",
+    };
+    lines.push(RichLine {
+        spans: vec![
+            RichSpan {
+                text: format!("{marker} {title} ({count})"),
+                style: SpanStyle {
+                    bold: count > 0,
+                    dim: count == 0,
+                    ..SpanStyle::default()
+                },
+                link: Some(section_link(section)),
+            },
+            span(
+                hint,
+                SpanStyle {
+                    dim: true,
+                    ..SpanStyle::default()
+                },
+            ),
+        ],
+        ..RichLine::default()
+    });
+    if open && count == 0 {
+        lines.push(RichLine {
+            indent: 2,
+            spans: vec![span(
+                "nenhum",
+                SpanStyle {
+                    dim: true,
+                    ..SpanStyle::default()
+                },
+            )],
+            ..RichLine::default()
+        });
+    }
+    open
+}
+
 pub(crate) fn detail_lines(
     key: &str,
     detail: Option<&IssueDetail>,
     error: Option<&str>,
     browse_base: &str,
+    collapsed: &HashSet<DetailSection>,
     now: Instant,
 ) -> Vec<RichLine> {
     let _ = now;
@@ -436,47 +515,97 @@ pub(crate) fn detail_lines(
             .map(|(key, summary)| format!("{key} {summary}")),
     );
     field("desenvolvimento", detail.development.clone());
-    if !detail.pull_requests.is_empty() {
-        lines.push(RichLine::plain("pull requests:", dim));
-    }
     let status_width = detail
         .pull_requests
         .iter()
         .map(|pull_request| pull_request.status.chars().count())
         .max()
         .unwrap_or(0);
-    for pull_request in &detail.pull_requests {
-        let status = pull_request.status.to_lowercase();
-        let declined = matches!(status.as_str(), "declined" | "closed");
-        let status_style = SpanStyle {
-            bold: status == "open",
-            dim: status != "open",
-            ..SpanStyle::default()
-        };
-        lines.push(RichLine {
-            indent: 2,
-            spans: vec![
-                span(&format!("{status:<status_width$}  "), status_style),
-                RichSpan {
-                    text: pull_request.label(),
-                    style: SpanStyle {
-                        underline: true,
-                        strike: declined,
-                        dim: declined,
-                        ..SpanStyle::default()
-                    },
-                    link: Some(pull_request.url.clone()),
-                },
-            ],
-            ..RichLine::default()
-        });
-        let title = pull_request.title.trim();
-        if !title.is_empty() && !title.starts_with(&issue.key) {
+    if section_header(
+        &mut lines,
+        DetailSection::PullRequests,
+        "pull requests",
+        detail.pull_requests.len(),
+        collapsed,
+    ) {
+        for pull_request in &detail.pull_requests {
+            let status = pull_request.status.to_lowercase();
+            let declined = matches!(status.as_str(), "declined" | "closed");
+            let status_style = SpanStyle {
+                bold: status == "open",
+                dim: status != "open",
+                ..SpanStyle::default()
+            };
             lines.push(RichLine {
-                indent: 4 + status_width,
-                spans: vec![span(title, dim)],
+                indent: 2,
+                spans: vec![
+                    span(&format!("{status:<status_width$}  "), status_style),
+                    RichSpan {
+                        text: pull_request.label(),
+                        style: SpanStyle {
+                            underline: true,
+                            strike: declined,
+                            dim: declined,
+                            ..SpanStyle::default()
+                        },
+                        link: Some(pull_request.url.clone()),
+                    },
+                ],
                 ..RichLine::default()
             });
+            let title = pull_request.title.trim();
+            if !title.is_empty() && !title.starts_with(&issue.key) {
+                lines.push(RichLine {
+                    indent: 4 + status_width,
+                    spans: vec![span(title, dim)],
+                    ..RichLine::default()
+                });
+            }
+        }
+    }
+    let repo_width = detail
+        .worktrees
+        .iter()
+        .map(|worktree| worktree.repo.chars().count())
+        .max()
+        .unwrap_or(0);
+    if section_header(
+        &mut lines,
+        DetailSection::Worktrees,
+        "worktrees",
+        detail.worktrees.len(),
+        collapsed,
+    ) {
+        for (index, worktree) in detail.worktrees.iter().enumerate() {
+            let mut spans = vec![
+                span(&format!("{:<repo_width$}  ", worktree.repo), dim),
+                RichSpan {
+                    text: worktree.name.clone(),
+                    style: SpanStyle {
+                        underline: true,
+                        ..SpanStyle::default()
+                    },
+                    link: Some(format!("{WORKTREE_LINK}{index}")),
+                },
+            ];
+            if let Some(pull_request) = worktree.pull_request(&detail.pull_requests) {
+                spans.push(span(
+                    &format!(" → #{}", pull_request.number().unwrap_or("?")),
+                    bold,
+                ));
+            }
+            lines.push(RichLine {
+                indent: 2,
+                spans,
+                ..RichLine::default()
+            });
+            if let Some(branch) = &worktree.branch {
+                lines.push(RichLine {
+                    indent: 4 + repo_width,
+                    spans: vec![span(branch, dim)],
+                    ..RichLine::default()
+                });
+            }
         }
     }
     let url = format!("{browse_base}{}", issue.key);
@@ -1049,16 +1178,35 @@ mod tests {
                 title: "VK25-3: tela nova".into(),
                 url: "https://github.com/vakinha/vakinha-web/pull/5783".into(),
                 repository: "vakinha/vakinha-web".into(),
+                branch: Some("task/VK25-3/tela".into()),
             }],
+            worktrees: vec![
+                super::super::model::Worktree {
+                    repo: "vakinha-api".into(),
+                    name: "VK25-3-api".into(),
+                    path: "/r/vakinha-api-worktrees/VK25-3-api".into(),
+                    branch: Some("task/VK25-3/api".into()),
+                },
+                super::super::model::Worktree {
+                    repo: "vakinha-web".into(),
+                    name: "VK25-3".into(),
+                    path: "/r/vakinha-web-worktrees/VK25-3".into(),
+                    branch: Some("task/VK25-3/tela".into()),
+                },
+            ],
         };
         state.apply(Outcome::Detail(Box::new(detail)));
-        let terminal = draw(&mut state, 70, 30);
+        let terminal = draw(&mut state, 70, 40);
         let text = screen(&terminal);
 
         for expected in [
             "VK25-3 · Task · Code Review",
-            "pull requests:",
+            "▾ pull requests (1)",
             "open  vakinha/vakinha-web#5783",
+            "▾ worktrees (2)",
+            "vakinha-api  VK25-3-api",
+            "vakinha-web  VK25-3 → #5783",
+            "task/VK25-3/tela",
             "sprint: Sprint 9",
             "pontos: 2",
             "desenvolvimento: 1 PR (open)",
@@ -1069,11 +1217,79 @@ mod tests {
         ] {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
+        assert!(!text.contains("vakinha-api  VK25-3-api → #"));
         let link = rect_of(&state, &Hit::Link("https://github.com/pr/1".into()));
         assert_eq!(
             click(&mut state, link.x, link.y),
             [Job::OpenUrl("https://github.com/pr/1".into())]
         );
+        let worktree = rect_of(&state, &Hit::Worktree(1));
+        assert_eq!(
+            click(&mut state, worktree.x, worktree.y),
+            [Job::OpenWorktree {
+                path: "/r/vakinha-web-worktrees/VK25-3".into(),
+                name: "VK25-3".into(),
+            }]
+        );
+
+        state.key(press(KeyCode::Char('t')));
+        let text = screen(&draw(&mut state, 70, 40));
+        assert!(text.contains("▸ worktrees (2)"));
+        assert!(!text.contains("VK25-3-api"));
+        let header = rect_of(&state, &Hit::Section(DetailSection::PullRequests));
+        click(&mut state, header.x, header.y);
+        let text = screen(&draw(&mut state, 70, 40));
+        assert!(text.contains("▸ pull requests (1)"));
+        assert!(!text.contains("vakinha/vakinha-web#5783"));
+        state.key(press(KeyCode::Char('p')));
+        state.key(press(KeyCode::Char('t')));
+        let text = screen(&draw(&mut state, 70, 40));
+        assert!(text.contains("▾ pull requests (1)") && text.contains("▾ worktrees (2)"));
+    }
+
+    #[test]
+    fn empty_sections_render_their_count_and_nenhum() {
+        let mut lines_state = HashSet::new();
+        let detail = IssueDetail {
+            issue: crate::cli::jira::state::tests::issue("VK25-3", "Code Review"),
+            description: None,
+            comments: Vec::new(),
+            sprint: None,
+            story_points: None,
+            development: None,
+            pull_requests: Vec::new(),
+            worktrees: Vec::new(),
+        };
+        let text = |collapsed: &HashSet<DetailSection>| {
+            detail_lines("VK25-3", Some(&detail), None, "", collapsed, Instant::now())
+                .iter()
+                .map(RichLine::text)
+                .collect::<Vec<_>>()
+        };
+        let open = text(&lines_state);
+        assert!(open.contains(&"▾ pull requests (0)  p".to_owned()));
+        assert!(open.contains(&"▾ worktrees (0)  t".to_owned()));
+        assert_eq!(
+            open.iter().filter(|line| line.trim() == "nenhum").count(),
+            2
+        );
+        lines_state.insert(DetailSection::Worktrees);
+        let closed = text(&lines_state);
+        assert!(closed.contains(&"▸ worktrees (0)  t".to_owned()));
+        assert_eq!(
+            closed.iter().filter(|line| line.trim() == "nenhum").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn internal_links_map_to_section_and_worktree_hits() {
+        assert_eq!(
+            link_hit(&section_link(DetailSection::Worktrees)),
+            Hit::Section(DetailSection::Worktrees)
+        );
+        assert_eq!(link_hit("herdr-jira:worktree:3"), Hit::Worktree(3));
+        assert_eq!(link_hit("https://x/y"), Hit::Link("https://x/y".into()));
     }
 
     #[test]
