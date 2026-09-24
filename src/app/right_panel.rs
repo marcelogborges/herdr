@@ -609,6 +609,150 @@ mod tests {
         );
     }
 
+    fn configure_tabs(app: &mut App, labels: &[&str]) {
+        let config = crate::config::RightPanelConfig {
+            tabs: labels
+                .iter()
+                .map(|label| crate::config::RightPanelTabConfig {
+                    label: (*label).into(),
+                    command: "sleep 30".into(),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let width = app.state.right_panel.width;
+        app.apply_right_panel_config(width, &config);
+    }
+
+    fn custom(label: &str) -> RightPanelMode {
+        RightPanelMode::Custom(label.into())
+    }
+
+    #[test]
+    fn cycle_reaches_custom_tabs_and_wraps_to_files() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_tabs(&mut app, &["rails c", "awsx"]);
+        app.show_right_panel(RightPanelMode::Jira);
+
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            app.cycle_right_panel(RightPanelCycleDirection::Next);
+            seen.push(app.state.right_panel.pane(owner).unwrap().mode.clone());
+        }
+        app.cycle_right_panel(RightPanelCycleDirection::Previous);
+        seen.push(app.state.right_panel.pane(owner).unwrap().mode.clone());
+
+        assert_eq!(
+            seen,
+            vec![
+                custom("rails c"),
+                custom("awsx"),
+                RightPanelMode::Files,
+                custom("awsx"),
+            ]
+        );
+    }
+
+    #[test]
+    fn switching_away_from_a_custom_tab_keeps_its_terminal() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_tabs(&mut app, &["rc"]);
+        let files = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+        let rc = install_instance(&mut app, owner, custom("rc"), "/a");
+
+        app.show_right_panel(custom("rc"));
+        app.sync_right_panel(target(), PANEL);
+        assert_eq!(displayed(&app, owner), Some(rc.terminal_id.clone()));
+        app.show_right_panel(RightPanelMode::Files);
+        app.sync_right_panel(target(), PANEL);
+        assert_eq!(displayed(&app, owner), Some(files.terminal_id));
+        app.show_right_panel(custom("rc"));
+        app.sync_right_panel(target(), PANEL);
+
+        assert_eq!(displayed(&app, owner), Some(rc.terminal_id.clone()));
+        assert!(app.state.terminals.contains_key(&rc.terminal_id));
+    }
+
+    #[test]
+    fn reload_removing_the_visible_custom_tab_releases_it_and_shows_files() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_tabs(&mut app, &["rc", "awsx"]);
+        let files = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+        let rc = install_instance(&mut app, owner, custom("rc"), "/a");
+        app.show_right_panel(custom("rc"));
+
+        configure_tabs(&mut app, &["awsx"]);
+        app.sync_right_panel(target(), PANEL);
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible);
+        assert_eq!(pane.mode, RightPanelMode::Files);
+        assert!(!app.state.terminals.contains_key(&rc.terminal_id));
+        assert_eq!(displayed(&app, owner), Some(files.terminal_id));
+    }
+
+    #[test]
+    fn a_mode_without_a_command_falls_back_to_files() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        let files = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+        app.show_right_panel(custom("gone"));
+
+        app.sync_right_panel(target(), PANEL);
+
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            RightPanelMode::Files
+        );
+        assert_eq!(displayed(&app, owner), Some(files.terminal_id));
+    }
+
+    #[test]
+    fn panel_env_lists_the_owner_claude_session_repos() {
+        let mut app = test_app();
+        app.state.ensure_test_terminals();
+        let owner = focused(&app);
+        let session_id = "0da32074-acd6-4c79-9d29-aac5cc63ca81";
+        let repos_env = |app: &App| {
+            app.right_panel_env(owner)
+                .into_iter()
+                .filter(|(key, _)| key == SESSION_REPOS_ENV)
+                .map(|(_, value)| value)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(repos_env(&app), vec![String::new()]);
+
+        let terminal_id = app.state.workspaces[0].terminal_id(owner).unwrap().clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id(session_id).unwrap(),
+            });
+        app.claude_sessions
+            .lock()
+            .unwrap()
+            .push(crate::claude_sessions::ClaudeSession {
+                session_id: session_id.into(),
+                title: String::new(),
+                cwd: "/r/api".into(),
+                context: String::new(),
+                worktree_path: None,
+                repos: vec!["/r/web".into(), "/r/api".into()],
+                updated_at_ms: 0,
+            });
+
+        assert_eq!(repos_env(&app), vec!["/r/web\n/r/api".to_owned()]);
+        let env = app.right_panel_env(owner);
+        assert!(env.iter().any(|(key, _)| key == PANEL_OWNER_PANE_ENV));
+    }
+
     #[test]
     fn cycle_opens_a_hidden_panel_focused_at_the_resulting_mode() {
         let mut app = test_app();

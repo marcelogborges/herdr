@@ -568,6 +568,117 @@ mod tests {
         );
     }
 
+    fn tabs_config(labels: &[&str]) -> RightPanelConfig {
+        RightPanelConfig {
+            tabs: labels
+                .iter()
+                .map(|label| RightPanelTabConfig {
+                    label: (*label).into(),
+                    command: format!("run {label}"),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn configured(labels: &[&str]) -> RightPanelState {
+        let mut state = RightPanelState::default();
+        assert!(state
+            .apply_config(default_width(), &tabs_config(labels))
+            .is_empty());
+        state
+    }
+
+    fn custom(label: &str) -> RightPanelMode {
+        RightPanelMode::Custom(label.into())
+    }
+
+    #[test]
+    fn custom_tabs_follow_the_builtins_in_header_order_and_truncate() {
+        let state = configured(&["rails c", "awsx"]);
+        let labels = |panel: Rect| {
+            header_tabs(panel, &state.modes())
+                .into_iter()
+                .map(|(mode, rect)| (mode.label().to_owned(), rect.x, rect.width))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            labels(Rect::new(0, 0, 60, 20)),
+            vec![
+                ("files".to_owned(), 2, 7),
+                ("diff".to_owned(), 10, 6),
+                ("jira".to_owned(), 17, 6),
+                ("rails c".to_owned(), 24, 9),
+                ("awsx".to_owned(), 34, 6),
+            ]
+        );
+        assert_eq!(labels(Rect::new(0, 0, 36, 20)).len(), 4);
+        assert_eq!(labels(Rect::new(0, 0, 24, 20)).len(), 3);
+    }
+
+    #[test]
+    fn modes_round_trip_through_their_labels() {
+        for mode in [
+            RightPanelMode::Files,
+            RightPanelMode::Diff,
+            RightPanelMode::Jira,
+            custom("rails c"),
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(json, format!("\"{}\"", mode.label()));
+            assert_eq!(serde_json::from_str::<RightPanelMode>(&json).unwrap(), mode);
+        }
+    }
+
+    #[test]
+    fn commands_resolve_for_builtins_and_configured_tabs_only() {
+        let state = configured(&["awsx"]);
+        assert_eq!(state.command(&RightPanelMode::Files), Some("yazi"));
+        assert_eq!(state.command(&custom("awsx")), Some("run awsx"));
+        assert_eq!(state.command(&custom("gone")), None);
+    }
+
+    #[test]
+    fn cycling_walks_custom_tabs_and_wraps_both_ways() {
+        let state = configured(&["a", "b"]);
+        let next = |mode: &RightPanelMode| state.cycled(mode, RightPanelCycleDirection::Next);
+        let previous =
+            |mode: &RightPanelMode| state.cycled(mode, RightPanelCycleDirection::Previous);
+
+        assert_eq!(next(&RightPanelMode::Jira), custom("a"));
+        assert_eq!(next(&custom("a")), custom("b"));
+        assert_eq!(next(&custom("b")), RightPanelMode::Files);
+        assert_eq!(previous(&RightPanelMode::Files), custom("b"));
+        assert_eq!(previous(&custom("a")), RightPanelMode::Jira);
+        assert_eq!(next(&custom("gone")), RightPanelMode::Diff);
+    }
+
+    #[test]
+    fn reload_without_a_tab_falls_back_to_files_and_releases_its_instances() {
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut state = configured(&["rc", "awsx"]);
+        state.instances = vec![
+            instance(a, custom("rc"), "/a"),
+            instance(a, RightPanelMode::Files, "/a"),
+            instance(b, custom("awsx"), "/b"),
+        ];
+        shown(&mut state, a, custom("rc"));
+        shown(&mut state, b, custom("awsx"));
+
+        let released = state.apply_config(default_width(), &tabs_config(&["awsx"]));
+
+        assert_eq!(
+            released.iter().map(|i| i.mode.clone()).collect::<Vec<_>>(),
+            vec![custom("rc")]
+        );
+        assert_eq!(state.pane(a).unwrap().mode, RightPanelMode::Files);
+        assert!(state.pane(a).unwrap().visible);
+        assert_eq!(state.pane(b).unwrap().mode, custom("awsx"));
+        assert_eq!(state.instances.len(), 2);
+        assert_eq!(state.custom_labels(), vec!["awsx".to_owned()]);
+    }
+
     #[test]
     fn public_ids_round_trip() {
         let terminal_id = TerminalId::alloc();

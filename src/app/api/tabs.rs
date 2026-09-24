@@ -732,6 +732,41 @@ mod tests {
         shutdown_test_runtimes(&mut app);
     }
 
+    #[test]
+    fn right_panel_show_accepts_builtin_and_custom_labels_and_rejects_unknown_ones() {
+        let mut app = claude_session_test_app();
+        let owner = app.state.workspaces[0].focused_pane_id().unwrap();
+        let config = crate::config::RightPanelConfig {
+            tabs: vec![crate::config::RightPanelTabConfig {
+                label: "rails c".into(),
+                command: "sleep 30".into(),
+            }],
+            ..Default::default()
+        };
+        let width = app.state.right_panel.width;
+        app.apply_right_panel_config(width, &config);
+        let show = |app: &mut App, mode: &str| {
+            let params = serde_json::from_value(serde_json::json!({ "mode": mode })).unwrap();
+            app.handle_right_panel_show("req".into(), params)
+        };
+
+        assert!(show(&mut app, "diff").contains("\"result\""));
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            crate::right_panel::RightPanelMode::Diff
+        );
+        assert!(show(&mut app, "rails c").contains("\"result\""));
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            crate::right_panel::RightPanelMode::Custom("rails c".into())
+        );
+        assert!(show(&mut app, "nope").contains("unknown_mode"));
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            crate::right_panel::RightPanelMode::Custom("rails c".into())
+        );
+    }
+
     #[tokio::test]
     async fn right_panel_open_resolves_against_the_calling_pane_and_reports_errors() {
         let mut app = claude_session_test_app();

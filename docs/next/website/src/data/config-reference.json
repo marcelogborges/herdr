@@ -1502,6 +1502,12 @@
           "type": "string",
           "default": "\"\\\"$HERDR_BIN_PATH\\\" jira\"",
           "description": "Command the right panel runs in jira mode, through /bin/sh -c. The default runs the interactive Jira board built into the running herdr binary; it receives HERDR_PANEL_OWNER_PANE_ID with the pane that owns the panel."
+        },
+        {
+          "key": "right_panel.tabs",
+          "type": "array of tables",
+          "default": "[]",
+          "description": "Extra panel tabs shown after files, diff, and jira. Each command runs through /bin/sh -c with HERDR_PANEL_OWNER_PANE_ID and HERDR_SESSION_REPOS set; the label is also the mode accepted by right_panel.show. Empty, duplicate, or built-in labels are skipped with a diagnostic."
         }
       ]
     },
