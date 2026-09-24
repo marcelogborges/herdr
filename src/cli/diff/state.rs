@@ -261,7 +261,9 @@ impl DiffState {
     fn rebuild_rows(&mut self) {
         let first_changed = self.repos.iter().position(RepoDiff::has_changes);
         let any_open = self.repos.iter().any(|repo| {
-            repo.has_changes() && self.seen.contains(&repo.root) && !self.collapsed.contains(&repo.root)
+            repo.has_changes()
+                && self.seen.contains(&repo.root)
+                && !self.collapsed.contains(&repo.root)
         });
         for (index, repo) in self.repos.iter().enumerate() {
             if !repo.has_changes() || !self.seen.insert(repo.root.clone()) {
@@ -281,9 +283,9 @@ impl DiffState {
         self.rows = rows;
         if self.selected_row().is_none() {
             let parent = match &self.selection {
-                Some(Selection::File(root, _)) => self
-                    .repo_index(root)
-                    .map(|_| Selection::Repo(root.clone())),
+                Some(Selection::File(root, _)) => {
+                    self.repo_index(root).map(|_| Selection::Repo(root.clone()))
+                }
                 _ => None,
             };
             self.selection = parent
@@ -731,7 +733,10 @@ pub(crate) mod tests {
                 repo("/w/clean", vec![]),
                 repo(
                     "/w/api",
-                    vec![change("app/a.rb", 'M', 3, 1), change("spec/a_spec.rb", 'A', 9, 0)],
+                    vec![
+                        change("app/a.rb", 'M', 3, 1),
+                        change("spec/a_spec.rb", 'A', 9, 0),
+                    ],
                 ),
                 repo("/w/web", vec![change("src/b.ts", 'D', 0, 4)]),
             ],
@@ -746,7 +751,11 @@ pub(crate) mod tests {
         let roots: Vec<&Path> = state.repos.iter().map(|repo| repo.root.as_path()).collect();
         assert_eq!(
             roots,
-            [Path::new("/w/api"), Path::new("/w/web"), Path::new("/w/clean")]
+            [
+                Path::new("/w/api"),
+                Path::new("/w/web"),
+                Path::new("/w/clean")
+            ]
         );
         assert_eq!(
             state.rows,
@@ -791,7 +800,12 @@ pub(crate) mod tests {
         assert_eq!(state.mode, Mode::Pr);
 
         let effects = state.key(press(KeyCode::Char('b')));
-        assert_eq!(effects.jobs, [Job::Refresh { mode: Mode::Uncommitted }]);
+        assert_eq!(
+            effects.jobs,
+            [Job::Refresh {
+                mode: Mode::Uncommitted
+            }]
+        );
         assert!(state.key(press(KeyCode::Char('b'))).jobs.is_empty());
         assert_eq!(state.mode, Mode::Pr);
 
@@ -811,7 +825,10 @@ pub(crate) mod tests {
 
         let effects = state.key(press(KeyCode::Enter));
 
-        let [Job::FileDiff { root, file, width, .. }] = effects.jobs.as_slice() else {
+        let [Job::FileDiff {
+            root, file, width, ..
+        }] = effects.jobs.as_slice()
+        else {
             panic!("{:?}", effects.jobs);
         };
         assert_eq!(root, Path::new("/w/api"));
@@ -841,7 +858,10 @@ pub(crate) mod tests {
         let [Job::FileDiff { root, file, .. }] = effects.jobs.as_slice() else {
             panic!("{:?}", effects.jobs);
         };
-        assert_eq!((root.as_path(), file.path.as_str()), (Path::new("/w/web"), "src/b.ts"));
+        assert_eq!(
+            (root.as_path(), file.path.as_str()),
+            (Path::new("/w/web"), "src/b.ts")
+        );
         assert!(!state.is_collapsed(Path::new("/w/web")));
         assert!(state.key(press(KeyCode::Char('n'))).jobs.is_empty());
     }
@@ -850,7 +870,9 @@ pub(crate) mod tests {
     fn edit_needs_an_existing_file_and_lazygit_runs_in_the_selected_repo() {
         let mut state = loaded_state();
         let effects = state.key(press(KeyCode::Char('e')));
-        assert!(matches!(effects.jobs.as_slice(), [Job::Edit { file, .. }] if file.path == "app/a.rb"));
+        assert!(
+            matches!(effects.jobs.as_slice(), [Job::Edit { file, .. }] if file.path == "app/a.rb")
+        );
 
         state.selection = Some(Selection::File("/w/web".into(), "src/b.ts".into()));
         assert!(state.key(press(KeyCode::Char('e'))).jobs.is_empty());
@@ -916,7 +938,10 @@ pub(crate) mod tests {
             result: Ok(vec![]),
         });
         state.body_width = 90;
-        assert!(matches!(state.tick(now), Some(Job::FileDiff { width: 90, .. })));
+        assert!(matches!(
+            state.tick(now),
+            Some(Job::FileDiff { width: 90, .. })
+        ));
         assert_eq!(state.tick(now), None);
     }
 }

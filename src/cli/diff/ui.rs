@@ -56,7 +56,12 @@ pub(crate) fn render(frame: &mut Frame, state: &mut DiffState) {
     state.list_height = body.height as usize;
     state.body_width = body.width;
     let names = display_names(&state.repos, state.home.as_deref());
-    render_title(frame, state, &names, Rect::new(area.x, area.y, area.width, 1));
+    render_title(
+        frame,
+        state,
+        &names,
+        Rect::new(area.x, area.y, area.width, 1),
+    );
     match state.view {
         View::Tree => render_tree(frame, state, &names, body),
         View::File(_) => render_file(frame, state, body),
@@ -294,7 +299,10 @@ fn repo_line(repo: &RepoDiff, name: &str, collapsed: bool, width: usize) -> Line
     let lead = format!(" {marker} ");
     let available = width.saturating_sub(lead.width() + right_width + 1);
     let name = truncate_left(name, available);
-    let mut spans = vec![Span::styled(lead, name_style), Span::styled(name.clone(), name_style)];
+    let mut spans = vec![
+        Span::styled(lead, name_style),
+        Span::styled(name.clone(), name_style),
+    ];
     let mut used = 3 + name.width();
     if let Some(branch) = &repo.branch {
         let room = width.saturating_sub(used + right_width + 3);
@@ -308,7 +316,9 @@ fn repo_line(repo: &RepoDiff, name: &str, collapsed: bool, width: usize) -> Line
             ));
         }
     }
-    spans.push(Span::raw(" ".repeat(width.saturating_sub(used + right_width))));
+    spans.push(Span::raw(
+        " ".repeat(width.saturating_sub(used + right_width)),
+    ));
     spans.extend(right);
     Line::from(spans)
 }
@@ -375,10 +385,7 @@ fn render_file(frame: &mut Frame, state: &mut DiffState, area: Rect) {
     };
     let message = match (&view.error, &view.lines) {
         (Some(error), _) => Some(Span::styled(format!(" {error}"), Style::default().fg(RED))),
-        (None, None) => Some(Span::styled(
-            " carregando diff…",
-            Style::default().fg(GRAY),
-        )),
+        (None, None) => Some(Span::styled(" carregando diff…", Style::default().fg(GRAY))),
         (None, Some(lines)) if lines.is_empty() => Some(Span::styled(
             " diff vazio (mudança só de modo ou arquivo binário)",
             Style::default().fg(GRAY),
@@ -392,16 +399,19 @@ fn render_file(frame: &mut Frame, state: &mut DiffState, area: Rect) {
     let lines = view.lines.as_deref().unwrap_or_default();
     let height = area.height as usize;
     view.scroll = view.scroll.min(lines.len().saturating_sub(height));
-    let visible: Vec<Line<'static>> = lines.iter().skip(view.scroll).take(height).cloned().collect();
+    let visible: Vec<Line<'static>> = lines
+        .iter()
+        .skip(view.scroll)
+        .take(height)
+        .cloned()
+        .collect();
     frame.render_widget(Paragraph::new(visible), area);
 }
 
 pub(crate) fn display_names(repos: &[RepoDiff], home: Option<&Path>) -> Vec<String> {
     let common = common_ancestor(repos.iter().map(|repo| repo.root.as_path()));
     let usable = common.filter(|common| {
-        repos.len() > 1
-            && common.parent().is_some()
-            && home.is_none_or(|home| common != home)
+        repos.len() > 1 && common.parent().is_some() && home.is_none_or(|home| common != home)
     });
     repos
         .iter()
@@ -412,6 +422,14 @@ pub(crate) fn display_names(repos: &[RepoDiff], home: Option<&Path>) -> Vec<Stri
                         return relative.display().to_string();
                     }
                 }
+            }
+            let workspace = home.map(|home| home.join("projects"));
+            if let Some(relative) = workspace
+                .as_deref()
+                .and_then(|workspace| repo.root.strip_prefix(workspace).ok())
+                .filter(|relative| !relative.as_os_str().is_empty())
+            {
+                return relative.display().to_string();
             }
             match home.and_then(|home| repo.root.strip_prefix(home).ok()) {
                 Some(relative) => format!("~/{}", relative.display()),
@@ -532,13 +550,17 @@ mod tests {
         draw(&mut state, 60, 12);
         assert!(click(&mut state, 10, 3).is_empty());
         let jobs = click(&mut state, 10, 3);
-        assert!(matches!(jobs.as_slice(), [Job::FileDiff { file, .. }] if file.path == "spec/a_spec.rb"));
+        assert!(
+            matches!(jobs.as_slice(), [Job::FileDiff { file, .. }] if file.path == "spec/a_spec.rb")
+        );
 
         state.apply(Outcome::FileDiff {
             root: "/w/api".into(),
             path: "spec/a_spec.rb".into(),
             width: 60,
-            result: Ok(crate::cli::diff::ansi::parse(b"\x1b[32m+ added line\x1b[0m\n")),
+            result: Ok(crate::cli::diff::ansi::parse(
+                b"\x1b[32m+ added line\x1b[0m\n",
+            )),
         });
         let terminal = draw(&mut state, 60, 12);
         let text = screen(&terminal);
@@ -589,6 +611,10 @@ mod tests {
         assert_eq!(
             display_names(&[repo("/home/me/p/api")], Some(home)),
             ["~/p/api"]
+        );
+        assert_eq!(
+            display_names(&[repo("/home/me/projects/vakinha-api")], Some(home)),
+            ["vakinha-api"]
         );
         assert_eq!(
             display_names(&[repo("/home/me/a"), repo("/opt/b")], Some(home)),

@@ -106,7 +106,12 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 fn verified(root: &Path, rev: &str) -> bool {
     git(
         root,
-        &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")],
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{rev}^{{commit}}"),
+        ],
     )
     .is_ok()
 }
@@ -194,10 +199,7 @@ pub(crate) fn changed_files(root: &Path, base_rev: &str) -> Result<Vec<FileChang
             }
         })
         .collect();
-    let untracked = git(
-        root,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-    )?;
+    let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
     for path in untracked.split('\0').filter(|path| !path.is_empty()) {
         let (adds, binary) = count_lines(&root.join(path));
         files.push(FileChange {
@@ -299,7 +301,8 @@ fn raw_file_diff(
         command.arg(&file.path);
     }
     let output = command.output().map_err(|err| format!("git: {err}"))?;
-    let expected = output.status.success() || (file.status == '?' && output.status.code() == Some(1));
+    let expected =
+        output.status.success() || (file.status == '?' && output.status.code() == Some(1));
     if !expected {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }

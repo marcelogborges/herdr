@@ -133,7 +133,9 @@ mod tests {
 
     #[test]
     fn sgr_sequences_become_styled_spans() {
-        let lines = parse(b"\x1b[1;38;2;10;20;30mbold\x1b[0m plain\n\x1b[48;5;22m\x1b[31mred\x1b[39mbg\x1b[m\n");
+        let lines = parse(
+            b"\x1b[1;38;2;10;20;30mbold\x1b[0m plain\n\x1b[48;5;22m\x1b[31mred\x1b[39mbg\x1b[m\n",
+        );
 
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].spans[0].content, "bold");
@@ -146,14 +148,20 @@ mod tests {
         assert_eq!(lines[0].spans[1].style, Style::default());
         assert_eq!(
             lines[1].spans[0].style,
-            Style::default().fg(Color::Indexed(1)).bg(Color::Indexed(22))
+            Style::default()
+                .fg(Color::Indexed(1))
+                .bg(Color::Indexed(22))
         );
-        assert_eq!(lines[1].spans[1].style, Style::default().bg(Color::Indexed(22)));
+        assert_eq!(
+            lines[1].spans[1].style,
+            Style::default().bg(Color::Indexed(22))
+        );
     }
 
     #[test]
     fn style_carries_across_lines_and_other_escapes_are_dropped() {
-        let lines = parse(b"\x1b[32mgreen\x1b[K\nstill\x1b]8;;http://x\x1b\\link\x1b]8;;\x07\n\ta\r");
+        let lines =
+            parse(b"\x1b[32mgreen\x1b[K\nstill\x1b]8;;http://x\x1b\\link\x1b]8;;\x07\n\ta\r");
 
         assert_eq!(lines[0].spans[0].content, "green");
         assert_eq!(lines[1].spans[0].content, "stilllink");

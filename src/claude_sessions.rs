@@ -785,7 +785,10 @@ mod tests {
         std::fs::write(worktree.join(".git"), "gitdir: /x/.git/worktrees/VK-1\n").unwrap();
         std::fs::create_dir_all(dir.path().join("ws/.git/info")).unwrap();
 
-        assert_eq!(repo_root(&api.join("src/deep/missing.rs")), Some(api.clone()));
+        assert_eq!(
+            repo_root(&api.join("src/deep/missing.rs")),
+            Some(api.clone())
+        );
         assert_eq!(repo_root(&api.join("src/../src/deep")), Some(api.clone()));
         assert_eq!(repo_root(&worktree.join("lib/new/file.rb")), Some(worktree));
         assert_eq!(repo_root(&dir.path().join("ws/notes")), None);
@@ -793,7 +796,10 @@ mod tests {
 
         let mut resolver = RepoResolver::default();
         assert_eq!(resolver.resolve(&api.join("src")), Some(api.clone()));
-        assert_eq!(resolver.cache.get(&api.join("src")), Some(&Some(api.clone())));
+        assert_eq!(
+            resolver.cache.get(&api.join("src")),
+            Some(&Some(api.clone()))
+        );
         assert_eq!(resolver.resolve(&api.join("src/deep")), Some(api));
     }
 

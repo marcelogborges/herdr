@@ -33,11 +33,9 @@ pub(super) fn run_diff_command(args: &[String]) -> io::Result<i32> {
         print_help();
         return Ok(2);
     }
-    let owner_pane = OWNER_PANE_ENVS.iter().find_map(|name| {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.is_empty())
-    });
+    let owner_pane = OWNER_PANE_ENVS
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut terminal = enter_terminal()?;
