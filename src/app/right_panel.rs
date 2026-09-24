@@ -3,33 +3,75 @@ use std::path::{Path, PathBuf};
 use ratatui::layout::Rect;
 use tracing::warn;
 
+use crate::app::state::AppState;
 use crate::app::App;
 use crate::layout::PaneId;
 use crate::pane::PaneLaunchEnv;
 use crate::right_panel::{self, RightPanelInstance, RightPanelMode, MAX_INSTANCES};
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
+use crate::ui::TabSurfaceTarget;
+
+impl AppState {
+    pub(crate) fn right_panel_owner(&self, target: TabSurfaceTarget) -> Option<PaneId> {
+        Some(
+            self.workspaces
+                .get(target.workspace_index)?
+                .tabs
+                .get(target.tab_index)?
+                .layout
+                .focused(),
+        )
+    }
+
+    fn focused_right_panel_owner(&self) -> Option<(usize, PaneId)> {
+        let ws_idx = self.active?;
+        let pane_id = self.workspaces.get(ws_idx)?.focused_pane_id()?;
+        Some((ws_idx, pane_id))
+    }
+
+    fn pane_exists(&self, pane_id: PaneId) -> bool {
+        self.workspaces
+            .iter()
+            .any(|workspace| workspace.find_tab_index_for_pane(pane_id).is_some())
+    }
+}
 
 impl App {
     pub(crate) fn toggle_right_panel(&mut self) {
-        self.release_exited_right_panel_instances();
-        let panel = &mut self.state.right_panel;
-        panel.visible = !panel.visible;
-        panel.focused = panel.visible;
-        panel.target = None;
-        panel.pending_open = None;
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        self.release_exited_right_panel_instances(owner);
+        let pane = self.state.right_panel.pane_mut(owner);
+        pane.visible = !pane.visible;
+        pane.focused = pane.visible;
+        if !pane.visible {
+            pane.pending_open = None;
+        }
         self.request_right_panel_render();
     }
 
     pub(crate) fn show_right_panel(&mut self, mode: RightPanelMode) {
-        self.release_exited_right_panel_instances();
-        let panel = &mut self.state.right_panel;
-        panel.mode = mode;
-        panel.visible = true;
-        panel.focused = true;
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        self.release_exited_right_panel_instances(owner);
+        let pane = self.state.right_panel.pane_mut(owner);
+        pane.mode = mode;
+        pane.visible = true;
+        pane.focused = true;
         self.request_right_panel_render();
     }
 
-    pub(crate) fn open_right_panel(&mut self, target: &crate::right_panel::OpenTarget) {
+    pub(crate) fn open_right_panel(
+        &mut self,
+        target: &crate::right_panel::OpenTarget,
+        owner: Option<PaneId>,
+    ) -> bool {
+        let focused = self.state.focused_right_panel_owner().map(|(_, pane)| pane);
+        let Some(owner) = owner.or(focused) else {
+            return false;
+        };
         let command = match target {
             crate::right_panel::OpenTarget::File { path, line } => {
                 Some(crate::right_panel::render_open_command(
@@ -40,11 +82,19 @@ impl App {
             }
             crate::right_panel::OpenTarget::Dir(_) => None,
         };
-        self.state.right_panel.pending_open = Some(crate::right_panel::PendingOpen {
+        self.release_exited_right_panel_instances(owner);
+        let pane = self.state.right_panel.pane_mut(owner);
+        pane.pending_open = Some(crate::right_panel::PendingOpen {
             dir: target.dir(),
             command,
         });
-        self.show_right_panel(RightPanelMode::Files);
+        pane.mode = RightPanelMode::Files;
+        pane.visible = true;
+        if focused == Some(owner) {
+            pane.focused = true;
+        }
+        self.request_right_panel_render();
+        true
     }
 
     pub(crate) fn set_right_panel_width(&mut self, width: Option<u16>) {
@@ -54,28 +104,46 @@ impl App {
         }
     }
 
-    fn release_exited_right_panel_instances(&mut self) {
-        for instance in self.state.right_panel.take_exited() {
+    fn release_exited_right_panel_instances(&mut self, owner: PaneId) {
+        for instance in self.state.right_panel.take_exited_for(owner) {
             self.release_right_panel_instance(instance);
         }
     }
 
     pub(crate) fn focus_right_panel(&mut self, terminal_id: &str) -> bool {
-        let panel = &mut self.state.right_panel;
-        let owns_active = panel.visible
-            && panel
-                .active
-                .as_ref()
-                .is_some_and(|active| active.as_str() == terminal_id);
-        if owns_active && !panel.focused {
-            panel.focused = true;
+        let Some(owner) = self
+            .state
+            .right_panel
+            .owns_terminal(terminal_id)
+            .map(|instance| instance.owner)
+        else {
+            return false;
+        };
+        let shown = self
+            .state
+            .right_panel
+            .displayed(owner)
+            .is_some_and(|instance| instance.terminal_id.as_str() == terminal_id);
+        let focused_owner = self.state.focused_right_panel_owner().map(|(_, pane)| pane);
+        if !shown || focused_owner != Some(owner) {
+            return false;
+        }
+        let pane = self.state.right_panel.pane_mut(owner);
+        if !pane.focused {
+            pane.focused = true;
             self.request_right_panel_render();
         }
-        owns_active
+        true
     }
 
     pub(crate) fn blur_right_panel(&mut self) {
-        if std::mem::take(&mut self.state.right_panel.focused) {
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        let Some(pane) = self.state.right_panel.panes.get_mut(&owner) else {
+            return;
+        };
+        if std::mem::take(&mut pane.focused) {
             self.request_right_panel_render();
         }
     }
@@ -101,89 +169,124 @@ impl App {
         true
     }
 
-    pub(crate) fn sync_right_panel(&mut self, panel: Rect) {
-        if !self.state.right_panel.visible {
-            return;
+    pub(crate) fn release_right_panel_owner(&mut self, owner: PaneId) {
+        let removed = self.state.right_panel.remove_owner(owner);
+        let changed = !removed.is_empty();
+        for instance in removed {
+            self.release_right_panel_instance(instance);
         }
-        let target = self.right_panel_target_pane();
-        let mode = self.state.right_panel.mode;
-        let key = target.map(|(ws_idx, pane_id)| (ws_idx, pane_id, mode));
-        if let Some(open) = self.state.right_panel.pending_open.take() {
-            self.state.right_panel.target = key;
-            self.activate_right_panel_open(open, panel);
-            return;
+        if changed {
+            self.request_right_panel_render();
         }
-        if key.is_some()
-            && key == self.state.right_panel.target
-            && self.state.right_panel.active_instance().is_some()
-        {
-            return;
-        }
-        let dir = self.right_panel_dir(target);
-        self.state.right_panel.target = key;
-        if let Some(index) = self.state.right_panel.find(mode, &dir) {
-            self.state.right_panel.activate(index);
-            return;
-        }
-        let command = self.state.right_panel.command(mode).to_owned();
-        self.start_right_panel_instance(mode, dir, command, panel);
     }
 
-    fn activate_right_panel_open(&mut self, open: right_panel::PendingOpen, panel: Rect) {
-        let existing = self
+    fn prune_right_panel_owners(&mut self) {
+        let gone = self
             .state
             .right_panel
-            .find(RightPanelMode::Files, &open.dir);
-        let Some(command) = open.command else {
-            if let Some(index) = existing {
-                self.state.right_panel.activate(index);
-            } else {
-                let command = self.state.right_panel.files_command.clone();
-                self.start_right_panel_instance(RightPanelMode::Files, open.dir, command, panel);
-            }
+            .panes
+            .keys()
+            .copied()
+            .chain(self.state.right_panel.instances.iter().map(|i| i.owner))
+            .filter(|owner| !self.state.pane_exists(*owner))
+            .collect::<std::collections::HashSet<_>>();
+        for owner in gone {
+            self.release_right_panel_owner(owner);
+        }
+    }
+
+    pub(crate) fn sync_right_panel(&mut self, target: TabSurfaceTarget, panel: Rect) {
+        self.prune_right_panel_owners();
+        let Some(owner) = self.state.right_panel_owner(target) else {
             return;
         };
-        if let Some(index) = existing {
-            let replaced = self.state.right_panel.instances.remove(index);
-            if self.state.right_panel.active.as_ref() == Some(&replaced.terminal_id) {
-                self.state.right_panel.active = None;
-            }
+        let Some(pane) = self
+            .state
+            .right_panel
+            .pane(owner)
+            .filter(|pane| pane.visible)
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(open) = self.state.right_panel.pane_mut(owner).pending_open.take() {
+            self.apply_right_panel_open(target, owner, open, panel);
+            return;
+        }
+        if let Some(index) = self.state.right_panel.instance_for(owner, pane.mode) {
+            self.state.right_panel.touch(index);
+            return;
+        }
+        let dir = self.right_panel_dir(Some((target.workspace_index, owner)));
+        let command = self.state.right_panel.command(pane.mode).to_owned();
+        self.start_right_panel_instance(owner, pane.mode, dir, command, panel);
+    }
+
+    fn apply_right_panel_open(
+        &mut self,
+        target: TabSurfaceTarget,
+        owner: PaneId,
+        open: right_panel::PendingOpen,
+        panel: Rect,
+    ) {
+        let reusable = open.command.is_none()
+            && self
+                .state
+                .right_panel
+                .instance_for(owner, RightPanelMode::Files)
+                .is_some_and(|index| {
+                    let instance = &self.state.right_panel.instances[index];
+                    !instance.exited && instance.dir == open.dir
+                });
+        if reusable {
+            self.sync_right_panel(target, panel);
+            return;
+        }
+        if let Some(replaced) = self
+            .state
+            .right_panel
+            .take_instance(owner, RightPanelMode::Files)
+        {
             self.release_right_panel_instance(replaced);
         }
-        self.start_right_panel_instance(RightPanelMode::Files, open.dir, command, panel);
+        let command = open
+            .command
+            .unwrap_or_else(|| self.state.right_panel.files_command.clone());
+        self.start_right_panel_instance(owner, RightPanelMode::Files, open.dir, command, panel);
     }
 
     fn start_right_panel_instance(
         &mut self,
+        owner: PaneId,
         mode: RightPanelMode,
         dir: PathBuf,
         command: String,
         panel: Rect,
     ) {
         let content = right_panel::content_rect(panel);
-        match self.spawn_right_panel_instance(mode, dir, &command, content.height, content.width) {
+        match self.spawn_right_panel_instance(
+            owner,
+            mode,
+            dir,
+            &command,
+            content.height,
+            content.width,
+        ) {
             Ok(instance) => {
                 self.state.right_panel.instances.push(instance);
                 let last = self.state.right_panel.instances.len() - 1;
-                self.state.right_panel.activate(last);
-                for evicted in self.state.right_panel.evict_over(MAX_INSTANCES) {
+                let shown = self.state.right_panel.touch(last);
+                for evicted in self.state.right_panel.evict_over(MAX_INSTANCES, &[shown]) {
                     self.release_right_panel_instance(evicted);
                 }
             }
             Err(err) => {
                 warn!(err = %err, "right panel command failed to start");
-                let panel = &mut self.state.right_panel;
-                panel.visible = false;
-                panel.focused = false;
-                panel.target = None;
+                let pane = self.state.right_panel.pane_mut(owner);
+                pane.visible = false;
+                pane.focused = false;
             }
         }
-    }
-
-    fn right_panel_target_pane(&self) -> Option<(usize, PaneId)> {
-        let ws_idx = self.state.active?;
-        let pane_id = self.state.workspaces.get(ws_idx)?.focused_pane_id()?;
-        Some((ws_idx, pane_id))
     }
 
     fn right_panel_dir(&self, target: Option<(usize, PaneId)>) -> PathBuf {
@@ -223,6 +326,7 @@ impl App {
 
     fn spawn_right_panel_instance(
         &mut self,
+        owner: PaneId,
         mode: RightPanelMode,
         dir: PathBuf,
         command: &str,
@@ -254,6 +358,7 @@ impl App {
             TerminalState::new(terminal_id.clone(), dir.clone()),
         );
         Ok(RightPanelInstance {
+            owner,
             mode,
             dir,
             pane_id,
@@ -296,8 +401,32 @@ mod tests {
         app
     }
 
-    fn install_instance(app: &mut App, mode: RightPanelMode, dir: &str) -> RightPanelInstance {
+    fn target() -> TabSurfaceTarget {
+        TabSurfaceTarget {
+            workspace_index: 0,
+            tab_index: 0,
+        }
+    }
+
+    fn focused(app: &App) -> PaneId {
+        app.state.workspaces[0].focused_pane_id().unwrap()
+    }
+
+    fn split(app: &mut App) -> (PaneId, PaneId) {
+        let first = focused(app);
+        let second = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.focus_pane_in_workspace(0, first);
+        (first, second)
+    }
+
+    fn install_instance(
+        app: &mut App,
+        owner: PaneId,
+        mode: RightPanelMode,
+        dir: &str,
+    ) -> RightPanelInstance {
         let instance = RightPanelInstance {
+            owner,
             mode,
             dir: PathBuf::from(dir),
             pane_id: PaneId::alloc(),
@@ -313,105 +442,224 @@ mod tests {
         instance
     }
 
+    fn displayed(app: &App, owner: PaneId) -> Option<TerminalId> {
+        app.state
+            .right_panel
+            .displayed(owner)
+            .map(|instance| instance.terminal_id.clone())
+    }
+
+    const PANEL: Rect = Rect::new(60, 0, 40, 20);
+
     #[test]
-    fn toggle_shows_focused_then_hides_unfocused() {
+    fn toggle_shows_focused_then_hides_unfocused_for_the_focused_pane() {
         let mut app = test_app();
+        let owner = focused(&app);
 
         app.toggle_right_panel();
-        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && pane.focused);
 
         app.toggle_right_panel();
-        assert!(!app.state.right_panel.visible && !app.state.right_panel.focused);
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(!pane.visible && !pane.focused);
     }
 
     #[test]
-    fn show_switches_mode_and_focuses() {
+    fn panel_state_is_isolated_per_pane_and_restored_on_return() {
         let mut app = test_app();
+        let (a, b) = split(&mut app);
+        let a_files = install_instance(&mut app, a, RightPanelMode::Files, "/a");
+        app.toggle_right_panel();
+        app.sync_right_panel(target(), PANEL);
+        assert_eq!(displayed(&app, a), Some(a_files.terminal_id.clone()));
 
+        app.state.focus_pane_in_workspace(0, b);
+        assert!(!app.state.right_panel.is_visible_for(Some(b)));
+        assert_eq!(app.state.right_panel_owner(target()), Some(b));
+        app.sync_right_panel(target(), PANEL);
+        assert_eq!(app.state.right_panel.pane(b), None);
+
+        app.state.focus_pane_in_workspace(0, a);
+        app.sync_right_panel(target(), PANEL);
+        assert_eq!(displayed(&app, a), Some(a_files.terminal_id));
+        assert!(app.state.right_panel.is_visible_for(Some(a)));
+    }
+
+    #[test]
+    fn mode_is_per_pane() {
+        let mut app = test_app();
+        let (a, b) = split(&mut app);
         app.show_right_panel(RightPanelMode::Diff);
+        app.state.focus_pane_in_workspace(0, b);
+        app.show_right_panel(RightPanelMode::Files);
 
-        assert_eq!(app.state.right_panel.mode, RightPanelMode::Diff);
-        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
+        assert_eq!(
+            app.state.right_panel.pane(a).unwrap().mode,
+            RightPanelMode::Diff
+        );
+        assert_eq!(
+            app.state.right_panel.pane(b).unwrap().mode,
+            RightPanelMode::Files
+        );
+    }
+
+    #[test]
+    fn instances_are_not_shared_between_panes_in_the_same_directory() {
+        let mut app = test_app();
+        let (a, b) = split(&mut app);
+        let a_files = install_instance(&mut app, a, RightPanelMode::Files, "/same");
+        let b_files = install_instance(&mut app, b, RightPanelMode::Files, "/same");
+        app.toggle_right_panel();
+        app.state.focus_pane_in_workspace(0, b);
+        app.toggle_right_panel();
+
+        assert_eq!(displayed(&app, a), Some(a_files.terminal_id));
+        assert_eq!(displayed(&app, b), Some(b_files.terminal_id));
+    }
+
+    #[test]
+    fn open_for_an_unfocused_pane_prepares_it_without_stealing_the_view() {
+        let mut app = test_app();
+        let (a, b) = split(&mut app);
+
+        assert!(app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/b".into()), Some(b)));
+
+        assert_eq!(focused(&app), a);
+        assert!(!app.state.right_panel.is_visible_for(Some(a)));
+        let pane = app.state.right_panel.pane(b).unwrap();
+        assert!(pane.visible && !pane.focused);
+        assert_eq!(pane.mode, RightPanelMode::Files);
+        assert!(pane.pending_open.is_some());
+    }
+
+    #[test]
+    fn open_without_owner_targets_and_focuses_the_focused_pane() {
+        let mut app = test_app();
+        let owner = focused(&app);
+
+        assert!(app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/x".into()), None));
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && pane.focused);
+    }
+
+    #[test]
+    fn open_directory_reuses_the_pane_files_instance_in_that_directory() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        let files = install_instance(&mut app, owner, RightPanelMode::Files, "/d");
+
+        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/d".into()), None);
+        app.sync_right_panel(target(), PANEL);
+
+        assert_eq!(displayed(&app, owner), Some(files.terminal_id));
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().pending_open,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn open_file_replaces_only_that_pane_files_instance() {
+        let mut app = test_app();
+        app.state.right_panel.open_command = "sleep 30".into();
+        let (a, b) = split(&mut app);
+        let dir = std::env::temp_dir();
+        let file = dir.join(format!("herdr-open-{}.txt", std::process::id()));
+        std::fs::write(&file, "x\n").unwrap();
+        let a_old = install_instance(&mut app, a, RightPanelMode::Files, dir.to_str().unwrap());
+        let b_files = install_instance(&mut app, b, RightPanelMode::Files, dir.to_str().unwrap());
+
+        app.open_right_panel(
+            &crate::right_panel::OpenTarget::File {
+                path: file.clone(),
+                line: 3,
+            },
+            Some(a),
+        );
+        app.sync_right_panel(target(), PANEL);
+
+        let shown = app.state.right_panel.displayed(a).cloned().unwrap();
+        assert_ne!(shown.terminal_id, a_old.terminal_id);
+        assert_eq!(shown.dir, dir);
+        assert!(!app.state.terminals.contains_key(&a_old.terminal_id));
+        assert!(app
+            .state
+            .right_panel
+            .owns_terminal(b_files.terminal_id.as_str())
+            .is_some());
+        let _ = std::fs::remove_file(&file);
+        app.release_right_panel_instance(shown);
     }
 
     #[test]
     fn focus_moves_between_panel_and_panes() {
         let mut app = test_app();
-        let instance = install_instance(&mut app, RightPanelMode::Files, "/a");
-        app.state.right_panel.activate(0);
-        app.state.right_panel.visible = true;
+        let owner = focused(&app);
+        let instance = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+        app.state.right_panel.pane_mut(owner).visible = true;
 
         assert!(!app.focus_right_panel("term_other"));
         assert!(app.focus_right_panel(instance.terminal_id.as_str()));
-        assert!(app.state.right_panel.focused);
+        assert!(app.state.right_panel.pane(owner).unwrap().focused);
 
         app.blur_right_panel();
-        assert!(!app.state.right_panel.focused);
+        assert!(!app.state.right_panel.pane(owner).unwrap().focused);
     }
 
     #[test]
-    fn sync_reuses_the_instance_for_the_resolved_directory() {
+    fn focusing_another_pane_panel_is_refused() {
         let mut app = test_app();
-        let pane_id = app.state.workspaces[0].focused_pane_id().unwrap();
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
-        let expected_dir = app.right_panel_dir(Some((0, pane_id)));
-        let _other = install_instance(&mut app, RightPanelMode::Files, "/elsewhere");
-        let matching = install_instance(
-            &mut app,
-            RightPanelMode::Files,
-            expected_dir.to_str().unwrap(),
-        );
-        app.state.right_panel.visible = true;
+        let (_, b) = split(&mut app);
+        let b_files = install_instance(&mut app, b, RightPanelMode::Files, "/b");
+        app.state.right_panel.pane_mut(b).visible = true;
 
-        app.sync_right_panel(Rect::new(60, 0, 40, 20));
-
-        assert_eq!(
-            app.state.right_panel.active.as_ref(),
-            Some(&matching.terminal_id)
-        );
-        assert_eq!(
-            app.state.right_panel.target,
-            Some((0, pane_id, RightPanelMode::Files))
-        );
-        assert!(expected_dir.is_absolute() || expected_dir == home);
+        assert!(!app.focus_right_panel(b_files.terminal_id.as_str()));
     }
 
     #[test]
-    fn pane_died_for_active_instance_hides_and_releases_it() {
+    fn closing_a_tiled_pane_releases_its_instances() {
         let mut app = test_app();
-        let instance = install_instance(&mut app, RightPanelMode::Diff, "/a");
-        app.state.right_panel.instances[0].spawned_at -= crate::right_panel::FAILED_START_WINDOW;
-        app.state.right_panel.activate(0);
-        app.state.right_panel.visible = true;
-        app.state.right_panel.focused = true;
+        let (a, b) = split(&mut app);
+        let a_files = install_instance(&mut app, a, RightPanelMode::Files, "/a");
+        let b_files = install_instance(&mut app, b, RightPanelMode::Files, "/b");
+        app.state.right_panel.pane_mut(b).visible = true;
 
-        assert!(app.right_panel_pane_died(instance.pane_id));
+        app.release_right_panel_owner(b);
 
-        assert!(!app.state.right_panel.visible);
-        assert!(app.state.right_panel.instances.is_empty());
-        assert!(!app.state.terminals.contains_key(&instance.terminal_id));
-        assert!(!app.right_panel_pane_died(instance.pane_id));
+        assert!(app.state.right_panel.pane(b).is_none());
+        assert!(!app.state.terminals.contains_key(&b_files.terminal_id));
+        assert!(app.state.terminals.contains_key(&a_files.terminal_id));
     }
 
     #[test]
-    fn hide_show_hide_keeps_the_live_instance_for_reuse() {
+    fn sync_prunes_state_for_panes_that_no_longer_exist() {
         let mut app = test_app();
-        let instance = install_instance(&mut app, RightPanelMode::Files, "/a");
-        app.state.right_panel.activate(0);
+        let gone = PaneId::alloc();
+        let orphan = install_instance(&mut app, gone, RightPanelMode::Files, "/gone");
+        app.state.right_panel.pane_mut(gone).visible = true;
+
+        app.sync_right_panel(target(), PANEL);
+
+        assert!(app.state.right_panel.pane(gone).is_none());
+        assert!(!app.state.terminals.contains_key(&orphan.terminal_id));
+    }
+
+    #[test]
+    fn hide_show_hide_keeps_the_pane_instance_for_reuse() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        let instance = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
 
         app.toggle_right_panel();
-        assert!(app.state.right_panel.visible);
         app.toggle_right_panel();
-        assert!(!app.state.right_panel.visible && !app.state.right_panel.focused);
         app.toggle_right_panel();
-        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
-        assert_eq!(
-            app.state.right_panel.active.as_ref(),
-            Some(&instance.terminal_id)
-        );
+        app.sync_right_panel(target(), PANEL);
+        assert_eq!(displayed(&app, owner), Some(instance.terminal_id.clone()));
         app.toggle_right_panel();
 
-        assert!(!app.state.right_panel.visible);
+        assert!(!app.state.right_panel.is_visible_for(Some(owner)));
         assert_eq!(app.state.right_panel.instances, vec![instance.clone()]);
         assert!(app.state.terminals.contains_key(&instance.terminal_id));
     }
@@ -419,165 +667,45 @@ mod tests {
     #[test]
     fn failed_start_stays_visible_and_the_next_show_respawns() {
         let mut app = test_app();
-        let files = install_instance(&mut app, RightPanelMode::Files, "/a");
-        let diff = install_instance(&mut app, RightPanelMode::Diff, "/a");
-        app.state.right_panel.activate(1);
-        app.state.right_panel.mode = RightPanelMode::Diff;
-        app.state.right_panel.visible = true;
-        app.state.right_panel.target = Some((0, PaneId::alloc(), RightPanelMode::Diff));
+        let owner = focused(&app);
+        let files = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+        let diff = install_instance(&mut app, owner, RightPanelMode::Diff, "/a");
+        app.show_right_panel(RightPanelMode::Diff);
 
         assert!(app.right_panel_pane_died(diff.pane_id));
-        assert!(app.state.right_panel.visible);
+        assert!(app.state.right_panel.is_visible_for(Some(owner)));
         assert!(app.state.terminals.contains_key(&diff.terminal_id));
 
         app.show_right_panel(RightPanelMode::Files);
 
-        assert!(app.state.right_panel.visible);
-        assert_eq!(app.state.right_panel.mode, RightPanelMode::Files);
-        assert_eq!(app.state.right_panel.target, None);
         assert_eq!(app.state.right_panel.instances, vec![files]);
         assert!(!app.state.terminals.contains_key(&diff.terminal_id));
     }
 
     #[test]
-    fn failed_start_then_toggle_hides_and_the_next_toggle_shows_again() {
+    fn command_exit_after_startup_hides_only_that_pane_panel() {
         let mut app = test_app();
-        let diff = install_instance(&mut app, RightPanelMode::Diff, "/a");
-        app.state.right_panel.activate(0);
-        app.state.right_panel.mode = RightPanelMode::Diff;
-        app.state.right_panel.visible = true;
+        let (a, b) = split(&mut app);
+        let a_files = install_instance(&mut app, a, RightPanelMode::Files, "/a");
+        let _b_files = install_instance(&mut app, b, RightPanelMode::Files, "/b");
+        app.state.right_panel.instances[0].spawned_at -= crate::right_panel::FAILED_START_WINDOW;
+        app.state.right_panel.pane_mut(a).visible = true;
+        app.state.right_panel.pane_mut(b).visible = true;
 
-        assert!(app.right_panel_pane_died(diff.pane_id));
-        app.toggle_right_panel();
-        assert!(!app.state.right_panel.visible);
-        assert!(app.state.right_panel.instances.is_empty());
+        assert!(app.right_panel_pane_died(a_files.pane_id));
 
-        app.toggle_right_panel();
-
-        assert!(app.state.right_panel.visible);
-        assert_eq!(app.state.right_panel.active, None);
+        assert!(!app.state.right_panel.is_visible_for(Some(a)));
+        assert!(app.state.right_panel.is_visible_for(Some(b)));
+        assert!(!app.state.terminals.contains_key(&a_files.terminal_id));
+        assert!(!app.right_panel_pane_died(a_files.pane_id));
     }
 
     #[test]
-    fn command_exit_after_startup_hides_then_show_opens_fresh() {
-        let mut app = test_app();
-        let mut files = install_instance(&mut app, RightPanelMode::Files, "/a");
-        files.spawned_at -= crate::right_panel::FAILED_START_WINDOW;
-        app.state.right_panel.instances[0].spawned_at = files.spawned_at;
-        app.state.right_panel.activate(0);
-        app.state.right_panel.visible = true;
-
-        assert!(app.right_panel_pane_died(files.pane_id));
-        assert!(!app.state.right_panel.visible);
-        assert!(app.state.right_panel.instances.is_empty());
-
-        app.toggle_right_panel();
-
-        assert!(app.state.right_panel.visible);
-        assert_eq!(app.state.right_panel.target, None);
-    }
-
-    #[test]
-    fn open_directory_pins_the_panel_until_focus_moves() {
-        let mut app = test_app();
-        let pane_id = app.state.workspaces[0].focused_pane_id().unwrap();
-        let pane_dir = app.right_panel_dir(Some((0, pane_id)));
-        let pinned = install_instance(&mut app, RightPanelMode::Files, "/pinned");
-        let pane_instance =
-            install_instance(&mut app, RightPanelMode::Files, pane_dir.to_str().unwrap());
-        let panel = Rect::new(60, 0, 40, 20);
-
-        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/pinned".into()));
-        app.sync_right_panel(panel);
-        assert_eq!(
-            app.state.right_panel.active.as_ref(),
-            Some(&pinned.terminal_id)
-        );
-        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
-        assert_eq!(app.state.right_panel.mode, RightPanelMode::Files);
-
-        app.sync_right_panel(panel);
-        assert_eq!(
-            app.state.right_panel.active.as_ref(),
-            Some(&pinned.terminal_id)
-        );
-
-        app.state.right_panel.target = Some((0, PaneId::alloc(), RightPanelMode::Files));
-        app.sync_right_panel(panel);
-        assert_eq!(
-            app.state.right_panel.active.as_ref(),
-            Some(&pane_instance.terminal_id)
-        );
-    }
-
-    #[test]
-    fn toggle_drops_the_pin_and_pending_open() {
-        let mut app = test_app();
-        let pane_id = app.state.workspaces[0].focused_pane_id().unwrap();
-        let pane_dir = app.right_panel_dir(Some((0, pane_id)));
-        let _pinned = install_instance(&mut app, RightPanelMode::Files, "/pinned");
-        let pane_instance =
-            install_instance(&mut app, RightPanelMode::Files, pane_dir.to_str().unwrap());
-        let panel = Rect::new(60, 0, 40, 20);
-        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/pinned".into()));
-        app.sync_right_panel(panel);
-
-        app.toggle_right_panel();
-        assert_eq!(app.state.right_panel.target, None);
-        app.toggle_right_panel();
-        app.sync_right_panel(panel);
-
-        assert_eq!(
-            app.state.right_panel.active.as_ref(),
-            Some(&pane_instance.terminal_id)
-        );
-
-        app.open_right_panel(&crate::right_panel::OpenTarget::Dir("/pinned".into()));
-        app.toggle_right_panel();
-        assert_eq!(app.state.right_panel.pending_open, None);
-    }
-
-    #[tokio::test]
-    async fn open_file_replaces_the_files_instance_for_its_directory() {
-        let mut app = test_app();
-        app.state.right_panel.open_command = "sleep 30".into();
-        let dir = std::env::temp_dir();
-        let file = dir.join(format!("herdr-open-{}.txt", std::process::id()));
-        std::fs::write(&file, "x\n").unwrap();
-        let old = install_instance(&mut app, RightPanelMode::Files, dir.to_str().unwrap());
-        let panel = Rect::new(60, 0, 40, 20);
-
-        app.open_right_panel(&crate::right_panel::OpenTarget::File {
-            path: file.clone(),
-            line: 3,
-        });
-        app.sync_right_panel(panel);
-
-        let active = app.state.right_panel.active_instance().cloned().unwrap();
-        assert_ne!(active.terminal_id, old.terminal_id);
-        assert_eq!(active.dir, dir);
-        assert_eq!(active.mode, RightPanelMode::Files);
-        assert!(!app.state.terminals.contains_key(&old.terminal_id));
-        assert_eq!(
-            app.state
-                .right_panel
-                .find(RightPanelMode::Files, &dir)
-                .map(|index| app.state.right_panel.instances[index].terminal_id.clone()),
-            Some(active.terminal_id.clone())
-        );
-        let _ = std::fs::remove_file(&file);
-        app.release_right_panel_instance(active);
-    }
-
-    #[test]
-    fn set_width_survives_hide_show_and_config_reload_until_reset() {
+    fn set_width_is_global_and_survives_toggles_until_reset() {
         let mut app = test_app();
         app.set_right_panel_width(Some(40));
         app.toggle_right_panel();
         app.toggle_right_panel();
-        app.toggle_right_panel();
-        assert_eq!(app.state.right_panel.manual_width, Some(40));
-
         let width = app.state.right_panel.width;
         app.state
             .right_panel
@@ -585,7 +713,6 @@ mod tests {
         assert_eq!(app.state.right_panel.manual_width, Some(40));
 
         app.set_right_panel_width(None);
-        assert_eq!(app.state.right_panel.manual_width, None);
         assert_eq!(
             app.state.right_panel.effective_width(),
             app.state.right_panel.width
@@ -595,7 +722,8 @@ mod tests {
     #[test]
     fn right_panel_runtime_rejects_foreign_ids() {
         let mut app = test_app();
-        let instance = install_instance(&mut app, RightPanelMode::Files, "/a");
+        let owner = focused(&app);
+        let instance = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
         assert!(app.right_panel_runtime("w1:p1").is_none());
         assert!(app
             .right_panel_runtime(&right_panel::public_id(&instance.terminal_id))

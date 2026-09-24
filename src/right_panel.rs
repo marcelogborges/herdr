@@ -10,7 +10,7 @@ use crate::popup_size::PopupSize;
 use crate::terminal::TerminalId;
 
 pub(crate) const PUBLIC_ID_PREFIX: &str = "right-panel:";
-pub(crate) const MAX_INSTANCES: usize = 8;
+pub(crate) const MAX_INSTANCES: usize = 16;
 pub(crate) const FAILED_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 const MIN_PANEL_COLS: u16 = 20;
 const MIN_TAB_COLS: u16 = 20;
@@ -100,6 +100,7 @@ pub(crate) fn resolve_dir(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RightPanelInstance {
+    pub owner: PaneId,
     pub mode: RightPanelMode,
     pub dir: PathBuf,
     pub pane_id: PaneId,
@@ -120,38 +121,36 @@ pub(crate) enum PanelExit {
     KeptFailedStart,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RightPanelState {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PanePanel {
     pub visible: bool,
     pub focused: bool,
     pub mode: RightPanelMode,
+    pub pending_open: Option<PendingOpen>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RightPanelState {
     pub width: PopupSize,
     pub manual_width: Option<u16>,
     pub files_command: String,
     pub diff_command: String,
     pub open_command: String,
-    pub pending_open: Option<PendingOpen>,
+    pub panes: std::collections::HashMap<PaneId, PanePanel>,
     pub instances: Vec<RightPanelInstance>,
-    pub active: Option<TerminalId>,
-    pub target: Option<(usize, PaneId, RightPanelMode)>,
 }
 
 impl Default for RightPanelState {
     fn default() -> Self {
         let config = RightPanelConfig::default();
         Self {
-            visible: false,
-            focused: false,
-            mode: RightPanelMode::Files,
             width: default_width(),
             manual_width: None,
             files_command: config.files_command,
             diff_command: config.diff_command,
             open_command: config.open_command,
-            pending_open: None,
+            panes: std::collections::HashMap::new(),
             instances: Vec::new(),
-            active: None,
-            target: None,
         }
     }
 }
@@ -171,29 +170,52 @@ impl RightPanelState {
         }
     }
 
-    pub(crate) fn tab_area(&self, area: Rect) -> Rect {
-        if !self.visible {
+    pub(crate) fn effective_width(&self) -> PopupSize {
+        self.manual_width.map_or(self.width, PopupSize::Cells)
+    }
+
+    pub(crate) fn pane(&self, owner: PaneId) -> Option<&PanePanel> {
+        self.panes.get(&owner)
+    }
+
+    pub(crate) fn pane_mut(&mut self, owner: PaneId) -> &mut PanePanel {
+        self.panes.entry(owner).or_default()
+    }
+
+    pub(crate) fn is_visible_for(&self, owner: Option<PaneId>) -> bool {
+        owner
+            .and_then(|owner| self.pane(owner))
+            .is_some_and(|pane| pane.visible)
+    }
+
+    pub(crate) fn any_visible(&self) -> bool {
+        self.panes.values().any(|pane| pane.visible)
+    }
+
+    pub(crate) fn tab_area(&self, owner: Option<PaneId>, area: Rect) -> Rect {
+        if !self.is_visible_for(owner) {
             return area;
         }
         split_area(area, self.effective_width()).map_or(area, |(tab, _)| tab)
     }
 
-    pub(crate) fn panel_rect(&self, area: Rect) -> Option<Rect> {
-        if !self.visible {
+    pub(crate) fn panel_rect(&self, owner: Option<PaneId>, area: Rect) -> Option<Rect> {
+        if !self.is_visible_for(owner) {
             return None;
         }
         split_area(area, self.effective_width()).map(|(_, panel)| panel)
     }
 
-    pub(crate) fn effective_width(&self) -> PopupSize {
-        self.manual_width.map_or(self.width, PopupSize::Cells)
-    }
-
-    pub(crate) fn active_instance(&self) -> Option<&RightPanelInstance> {
-        let active = self.active.as_ref()?;
+    pub(crate) fn instance_for(&self, owner: PaneId, mode: RightPanelMode) -> Option<usize> {
         self.instances
             .iter()
-            .find(|instance| &instance.terminal_id == active)
+            .position(|instance| instance.owner == owner && instance.mode == mode)
+    }
+
+    pub(crate) fn displayed(&self, owner: PaneId) -> Option<&RightPanelInstance> {
+        let pane = self.pane(owner).filter(|pane| pane.visible)?;
+        self.instance_for(owner, pane.mode)
+            .map(|index| &self.instances[index])
     }
 
     pub(crate) fn owns_terminal(&self, terminal_id: &str) -> Option<&RightPanelInstance> {
@@ -202,43 +224,56 @@ impl RightPanelState {
             .find(|instance| instance.terminal_id.as_str() == terminal_id)
     }
 
-    pub(crate) fn find(&self, mode: RightPanelMode, dir: &Path) -> Option<usize> {
-        self.instances
-            .iter()
-            .position(|instance| !instance.exited && instance.mode == mode && instance.dir == dir)
-    }
-
-    pub(crate) fn take_exited(&mut self) -> Vec<RightPanelInstance> {
-        let (exited, live) = std::mem::take(&mut self.instances)
-            .into_iter()
-            .partition(|instance| instance.exited);
-        self.instances = live;
-        if self.active_instance().is_none() {
-            self.active = None;
-            self.target = None;
-        }
-        exited
-    }
-
-    pub(crate) fn activate(&mut self, index: usize) {
+    pub(crate) fn touch(&mut self, index: usize) -> TerminalId {
         let instance = self.instances.remove(index);
-        self.active = Some(instance.terminal_id.clone());
+        let terminal_id = instance.terminal_id.clone();
         self.instances.push(instance);
+        terminal_id
     }
 
-    pub(crate) fn evict_over(&mut self, cap: usize) -> Vec<RightPanelInstance> {
+    pub(crate) fn evict_over(
+        &mut self,
+        cap: usize,
+        protect: &[TerminalId],
+    ) -> Vec<RightPanelInstance> {
         let mut evicted = Vec::new();
         while self.instances.len() > cap {
             let Some(index) = self
                 .instances
                 .iter()
-                .position(|instance| Some(&instance.terminal_id) != self.active.as_ref())
+                .position(|instance| !protect.contains(&instance.terminal_id))
             else {
                 break;
             };
             evicted.push(self.instances.remove(index));
         }
         evicted
+    }
+
+    pub(crate) fn take_exited_for(&mut self, owner: PaneId) -> Vec<RightPanelInstance> {
+        let (exited, live) = std::mem::take(&mut self.instances)
+            .into_iter()
+            .partition(|instance| instance.owner == owner && instance.exited);
+        self.instances = live;
+        exited
+    }
+
+    pub(crate) fn take_instance(
+        &mut self,
+        owner: PaneId,
+        mode: RightPanelMode,
+    ) -> Option<RightPanelInstance> {
+        self.instance_for(owner, mode)
+            .map(|index| self.instances.remove(index))
+    }
+
+    pub(crate) fn remove_owner(&mut self, owner: PaneId) -> Vec<RightPanelInstance> {
+        self.panes.remove(&owner);
+        let (removed, kept) = std::mem::take(&mut self.instances)
+            .into_iter()
+            .partition(|instance| instance.owner == owner);
+        self.instances = kept;
+        removed
     }
 
     pub(crate) fn command_exited(
@@ -250,28 +285,32 @@ impl RightPanelState {
             .instances
             .iter()
             .position(|instance| instance.pane_id == pane_id)?;
-        let is_active = self.active.as_ref() == Some(&self.instances[index].terminal_id);
-        let failed_start =
-            now.saturating_duration_since(self.instances[index].spawned_at) < FAILED_START_WINDOW;
-        if is_active && self.visible && failed_start {
+        let instance = &self.instances[index];
+        let owner = instance.owner;
+        let displayed = self
+            .pane(owner)
+            .is_some_and(|pane| pane.visible && pane.mode == instance.mode);
+        let failed_start = now.saturating_duration_since(instance.spawned_at) < FAILED_START_WINDOW;
+        if displayed && failed_start {
             self.instances[index].exited = true;
             return Some(PanelExit::KeptFailedStart);
         }
         let instance = self.instances.remove(index);
-        if is_active {
-            self.active = None;
-            self.target = None;
-            self.visible = false;
-            self.focused = false;
+        if displayed {
+            let pane = self.pane_mut(owner);
+            pane.visible = false;
+            pane.focused = false;
         }
         Some(PanelExit::Released(instance))
     }
 
-    pub(crate) fn focused_public_id(&self) -> Option<String> {
-        if !self.visible || !self.focused {
+    pub(crate) fn focused_public_id(&self, owner: Option<PaneId>) -> Option<String> {
+        let owner = owner?;
+        if !self.pane(owner).is_some_and(|pane| pane.focused) {
             return None;
         }
-        self.active.as_ref().map(public_id)
+        self.displayed(owner)
+            .map(|instance| public_id(&instance.terminal_id))
     }
 }
 
@@ -365,8 +404,9 @@ pub(crate) fn worktree_path(text: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn instance(mode: RightPanelMode, dir: &str) -> RightPanelInstance {
+    fn instance(owner: PaneId, mode: RightPanelMode, dir: &str) -> RightPanelInstance {
         RightPanelInstance {
+            owner,
             mode,
             dir: PathBuf::from(dir),
             pane_id: PaneId::alloc(),
@@ -390,35 +430,6 @@ mod tests {
         assert_eq!(panel.width, 80);
 
         assert_eq!(split_area(Rect::new(0, 0, 39, 30), default_width()), None);
-    }
-
-    #[test]
-    fn tab_area_shrinks_only_while_visible() {
-        let area = Rect::new(0, 0, 120, 40);
-        let mut state = RightPanelState::default();
-        assert_eq!(state.tab_area(area), area);
-        assert_eq!(state.panel_rect(area), None);
-        state.visible = true;
-        assert_eq!(state.tab_area(area).width, 66);
-        assert_eq!(state.panel_rect(area), Some(Rect::new(66, 0, 54, 40)));
-    }
-
-    #[test]
-    fn manual_width_overrides_config_within_the_clamps() {
-        let area = Rect::new(0, 0, 120, 40);
-        let mut state = RightPanelState {
-            visible: true,
-            ..Default::default()
-        };
-        state.manual_width = Some(30);
-        assert_eq!(state.panel_rect(area).unwrap().width, 30);
-        assert_eq!(state.tab_area(area).width, 90);
-        state.manual_width = Some(5);
-        assert_eq!(state.panel_rect(area).unwrap().width, MIN_PANEL_COLS);
-        state.manual_width = Some(500);
-        assert_eq!(state.tab_area(area).width, MIN_TAB_COLS);
-        state.manual_width = None;
-        assert_eq!(state.panel_rect(area).unwrap().width, 54);
     }
 
     #[test]
@@ -585,121 +596,219 @@ mod tests {
         assert_eq!(worktree_path("/r/web-worktrees/"), None);
     }
 
-    #[test]
-    fn instances_are_keyed_by_mode_and_dir_and_touched_on_activate() {
-        let mut state = RightPanelState {
-            instances: vec![
-                instance(RightPanelMode::Files, "/a"),
-                instance(RightPanelMode::Diff, "/a"),
-                instance(RightPanelMode::Files, "/b"),
-            ],
-            ..Default::default()
-        };
-        assert_eq!(state.find(RightPanelMode::Diff, Path::new("/a")), Some(1));
-        assert_eq!(state.find(RightPanelMode::Diff, Path::new("/b")), None);
-
-        state.activate(0);
-        assert_eq!(state.instances.last().unwrap().dir, PathBuf::from("/a"));
-        assert_eq!(state.active_instance().unwrap().mode, RightPanelMode::Files);
+    fn shown(state: &mut RightPanelState, owner: PaneId, mode: RightPanelMode) {
+        let pane = state.pane_mut(owner);
+        pane.visible = true;
+        pane.mode = mode;
     }
 
     #[test]
-    fn eviction_drops_least_recent_but_keeps_active() {
+    fn layout_follows_the_owner_pane_visibility() {
+        let area = Rect::new(0, 0, 120, 40);
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut state = RightPanelState::default();
+        shown(&mut state, a, RightPanelMode::Files);
+
+        assert_eq!(state.tab_area(Some(a), area).width, 66);
+        assert_eq!(
+            state.panel_rect(Some(a), area),
+            Some(Rect::new(66, 0, 54, 40))
+        );
+        assert_eq!(state.tab_area(Some(b), area), area);
+        assert_eq!(state.panel_rect(Some(b), area), None);
+        assert_eq!(state.tab_area(None, area), area);
+        assert!(state.any_visible());
+    }
+
+    #[test]
+    fn manual_width_is_shared_by_every_pane_within_the_clamps() {
+        let area = Rect::new(0, 0, 120, 40);
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut state = RightPanelState::default();
+        shown(&mut state, a, RightPanelMode::Files);
+        shown(&mut state, b, RightPanelMode::Diff);
+        state.manual_width = Some(30);
+        assert_eq!(state.panel_rect(Some(a), area).unwrap().width, 30);
+        assert_eq!(state.panel_rect(Some(b), area).unwrap().width, 30);
+        state.manual_width = Some(5);
+        assert_eq!(
+            state.panel_rect(Some(a), area).unwrap().width,
+            MIN_PANEL_COLS
+        );
+        state.manual_width = Some(500);
+        assert_eq!(state.tab_area(Some(a), area).width, MIN_TAB_COLS);
+        state.manual_width = None;
+        assert_eq!(state.panel_rect(Some(a), area).unwrap().width, 54);
+    }
+
+    #[test]
+    fn displayed_instance_is_the_owner_instance_for_its_mode() {
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut state = RightPanelState {
+            instances: vec![
+                instance(a, RightPanelMode::Files, "/a"),
+                instance(a, RightPanelMode::Diff, "/a"),
+                instance(b, RightPanelMode::Files, "/a"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(state.displayed(a), None);
+        shown(&mut state, a, RightPanelMode::Diff);
+
+        assert_eq!(state.displayed(a), Some(&state.instances[1]));
+        state.pane_mut(a).mode = RightPanelMode::Files;
+        assert_eq!(state.displayed(a), Some(&state.instances[0]));
+        assert_eq!(state.displayed(b), None);
+        assert_eq!(state.instance_for(b, RightPanelMode::Files), Some(2));
+        assert_eq!(state.instance_for(b, RightPanelMode::Diff), None);
+    }
+
+    #[test]
+    fn eviction_drops_least_recent_but_never_a_protected_instance() {
+        let owner = PaneId::alloc();
         let mut state = RightPanelState {
             instances: (0..4)
-                .map(|index| instance(RightPanelMode::Files, &format!("/{index}")))
+                .map(|index| instance(owner, RightPanelMode::Files, &format!("/{index}")))
                 .collect(),
             ..Default::default()
         };
-        state.active = Some(state.instances[0].terminal_id.clone());
+        let protected = state.instances[0].terminal_id.clone();
 
-        let evicted = state.evict_over(2);
+        let evicted = state.evict_over(2, std::slice::from_ref(&protected));
 
         assert_eq!(
             evicted.iter().map(|i| i.dir.clone()).collect::<Vec<_>>(),
             [PathBuf::from("/1"), PathBuf::from("/2")]
         );
-        assert_eq!(state.instances.len(), 2);
-        assert!(state.active_instance().is_some());
+        assert!(state.owns_terminal(protected.as_str()).is_some());
+        assert_eq!(MAX_INSTANCES, 16);
     }
 
     #[test]
-    fn exit_of_active_instance_hides_the_panel() {
+    fn touch_moves_an_instance_to_most_recent() {
+        let owner = PaneId::alloc();
         let mut state = RightPanelState {
             instances: vec![
-                instance(RightPanelMode::Files, "/a"),
-                instance(RightPanelMode::Diff, "/a"),
+                instance(owner, RightPanelMode::Files, "/a"),
+                instance(owner, RightPanelMode::Diff, "/a"),
             ],
             ..Default::default()
         };
-        state.activate(1);
-        state.visible = true;
-        state.focused = true;
+        let first = state.instances[0].terminal_id.clone();
+
+        assert_eq!(state.touch(0), first);
+        assert_eq!(state.instances[1].terminal_id, first);
+    }
+
+    #[test]
+    fn exit_is_scoped_to_the_owner_pane() {
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut state = RightPanelState {
+            instances: vec![
+                instance(a, RightPanelMode::Files, "/a"),
+                instance(b, RightPanelMode::Files, "/b"),
+            ],
+            ..Default::default()
+        };
+        shown(&mut state, a, RightPanelMode::Files);
+        shown(&mut state, b, RightPanelMode::Files);
+        state.pane_mut(a).focused = true;
         let later = std::time::Instant::now() + FAILED_START_WINDOW;
 
-        let background = state.instances[0].pane_id;
+        let a_pane = state.instances[0].pane_id;
         assert!(matches!(
-            state.command_exited(background, later),
+            state.command_exited(a_pane, later),
             Some(PanelExit::Released(_))
         ));
-        assert!(state.visible);
 
-        let active = state.active_instance().unwrap().pane_id;
-        assert!(matches!(
-            state.command_exited(active, later),
-            Some(PanelExit::Released(_))
-        ));
-        assert!(!state.visible && !state.focused);
-        assert_eq!(state.active, None);
-        assert!(state.instances.is_empty());
-        assert_eq!(state.command_exited(active, later), None);
+        assert!(!state.pane(a).unwrap().visible && !state.pane(a).unwrap().focused);
+        assert!(state.pane(b).unwrap().visible);
+        assert!(state.displayed(b).is_some());
+        assert_eq!(state.command_exited(a_pane, later), None);
     }
 
     #[test]
-    fn failed_start_keeps_the_panel_open_until_the_next_show() {
+    fn early_exit_keeps_the_notice_until_the_owner_shows_again() {
+        let owner = PaneId::alloc();
         let mut state = RightPanelState {
             instances: vec![
-                instance(RightPanelMode::Files, "/a"),
-                instance(RightPanelMode::Diff, "/a"),
+                instance(owner, RightPanelMode::Files, "/a"),
+                instance(owner, RightPanelMode::Diff, "/a"),
             ],
             ..Default::default()
         };
-        state.activate(1);
-        state.visible = true;
-        state.focused = true;
-        let diff = state.active_instance().unwrap().pane_id;
+        shown(&mut state, owner, RightPanelMode::Diff);
+        let diff = state.instances[1].pane_id;
 
         assert_eq!(
             state.command_exited(diff, std::time::Instant::now()),
             Some(PanelExit::KeptFailedStart)
         );
-        assert!(state.visible);
-        assert!(state.active_instance().unwrap().exited);
-        assert_eq!(state.find(RightPanelMode::Diff, Path::new("/a")), None);
-        assert_eq!(state.find(RightPanelMode::Files, Path::new("/a")), Some(0));
+        assert!(state.pane(owner).unwrap().visible);
+        assert!(state.displayed(owner).unwrap().exited);
 
-        let released = state.take_exited();
-
+        let released = state.take_exited_for(owner);
         assert_eq!(released.len(), 1);
         assert_eq!(released[0].pane_id, diff);
-        assert_eq!(state.active, None);
-        assert_eq!(state.target, None);
         assert_eq!(state.instances.len(), 1);
     }
 
     #[test]
-    fn focused_public_id_requires_visible_focused_active() {
+    fn background_instance_exit_does_not_hide_the_panel() {
+        let owner = PaneId::alloc();
         let mut state = RightPanelState {
-            instances: vec![instance(RightPanelMode::Files, "/a")],
+            instances: vec![
+                instance(owner, RightPanelMode::Files, "/a"),
+                instance(owner, RightPanelMode::Diff, "/a"),
+            ],
             ..Default::default()
         };
-        state.activate(0);
-        assert_eq!(state.focused_public_id(), None);
-        state.visible = true;
-        state.focused = true;
+        shown(&mut state, owner, RightPanelMode::Files);
+        let diff = state.instances[1].pane_id;
+
+        assert!(matches!(
+            state.command_exited(diff, std::time::Instant::now()),
+            Some(PanelExit::Released(_))
+        ));
+        assert!(state.pane(owner).unwrap().visible);
+    }
+
+    #[test]
+    fn removing_an_owner_releases_only_its_instances() {
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut state = RightPanelState {
+            instances: vec![
+                instance(a, RightPanelMode::Files, "/a"),
+                instance(b, RightPanelMode::Files, "/b"),
+                instance(a, RightPanelMode::Diff, "/a"),
+            ],
+            ..Default::default()
+        };
+        shown(&mut state, a, RightPanelMode::Files);
+
+        let removed = state.remove_owner(a);
+
+        assert_eq!(removed.len(), 2);
+        assert!(state.pane(a).is_none());
+        assert_eq!(state.instances.len(), 1);
+        assert_eq!(state.instances[0].owner, b);
+    }
+
+    #[test]
+    fn focused_public_id_requires_the_owner_panel_focused_and_shown() {
+        let owner = PaneId::alloc();
+        let mut state = RightPanelState {
+            instances: vec![instance(owner, RightPanelMode::Files, "/a")],
+            ..Default::default()
+        };
+        assert_eq!(state.focused_public_id(Some(owner)), None);
+        shown(&mut state, owner, RightPanelMode::Files);
+        assert_eq!(state.focused_public_id(Some(owner)), None);
+        state.pane_mut(owner).focused = true;
         assert_eq!(
-            state.focused_public_id(),
-            Some(public_id(state.active.as_ref().unwrap()))
+            state.focused_public_id(Some(owner)),
+            Some(public_id(&state.instances[0].terminal_id))
         );
+        assert_eq!(state.focused_public_id(None), None);
     }
 }

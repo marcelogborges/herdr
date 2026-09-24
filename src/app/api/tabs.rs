@@ -159,19 +159,25 @@ impl App {
         id: String,
         params: crate::api::schema::RightPanelOpenParams,
     ) -> String {
-        let base = match params.pane_id.as_deref() {
+        let (owner, base) = match params.pane_id.as_deref() {
             Some(pane_id) => {
-                let Some(cwd) = self.pane_cwd_for_public_id(pane_id) else {
+                let (Some((_, owner)), Some(cwd)) = (
+                    self.parse_pane_id(pane_id),
+                    self.pane_cwd_for_public_id(pane_id),
+                ) else {
                     return encode_error(id, "pane_not_found", format!("pane {pane_id} not found"));
                 };
-                cwd
+                (Some(owner), cwd)
             }
-            None => std::env::current_dir().unwrap_or_else(|_| "/".into()),
+            None => (None, std::env::current_dir().unwrap_or_else(|_| "/".into())),
         };
         match crate::right_panel::resolve_open_target(&params.path, params.line, &base) {
             Ok(target) => {
-                self.open_right_panel(&target);
-                encode_success(id, ResponseResult::Ok {})
+                if self.open_right_panel(&target, owner) {
+                    encode_success(id, ResponseResult::Ok {})
+                } else {
+                    encode_error(id, "pane_not_found", "no focused pane to open the panel in")
+                }
             }
             Err(message) => encode_error(id, "file_not_found", message),
         }
@@ -717,14 +723,16 @@ mod tests {
         let response = open(&mut app, dir.to_str().unwrap(), None);
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert!(matches!(success.result, ResponseResult::Ok {}));
+        let owner = app.state.workspaces[0].focused_pane_id().unwrap();
+        let pane = app.state.right_panel.pane(owner).unwrap();
         assert_eq!(
-            app.state.right_panel.pending_open,
+            pane.pending_open,
             Some(crate::right_panel::PendingOpen {
                 dir: dir.clone(),
                 command: None,
             })
         );
-        assert!(app.state.right_panel.visible && app.state.right_panel.focused);
+        assert!(pane.visible && pane.focused);
         shutdown_test_runtimes(&mut app);
     }
 

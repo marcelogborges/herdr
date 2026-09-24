@@ -618,7 +618,7 @@ impl HeadlessServer {
         {
             let _ = resize_popup_runtime(&self.app, Rect::new(0, 0, cols, rows), cell_size);
         }
-        crate::server::client_shell::resize_right_panel_runtime(&self.app, area, cell_size);
+        crate::server::client_shell::resize_right_panel_runtime(&self.app, target, area, cell_size);
         true
     }
 

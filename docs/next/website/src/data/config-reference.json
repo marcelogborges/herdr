@@ -839,7 +839,7 @@
           "key": "keys.toggle_right_panel",
           "type": "keybinding",
           "default": "\"prefix+i\"",
-          "description": "Toggle the right files/diff panel."
+          "description": "Toggle the focused pane's right files/diff panel."
         },
         {
           "key": "keys.indexed.tabs",
@@ -1055,7 +1055,7 @@
           "key": "ui.right_panel_width",
           "type": "integer or string",
           "default": "\"45%\"",
-          "description": "Right files/diff panel width in cells, or a percentage string like \"45%\". Clamped so the panel and the tab area each keep at least 20 columns. Dragging the panel's left edge overrides it until the server restarts; double-click the edge to reset."
+          "description": "Right files/diff panel width, shared by every pane, in cells, or a percentage string like \"45%\". Clamped so the panel and the tab area each keep at least 20 columns. Dragging the panel's left edge overrides it until the server restarts; double-click the edge to reset."
         },
         {
           "key": "ui.status_indicators",

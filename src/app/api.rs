@@ -184,6 +184,7 @@ impl App {
             if self.right_panel_pane_died(*pane_id) {
                 return Vec::new();
             }
+            self.release_right_panel_owner(*pane_id);
             if self
                 .state
                 .popup_pane

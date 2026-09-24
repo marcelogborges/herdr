@@ -145,7 +145,7 @@ herdr right-panel open <PATH> [--line N]
 herdr right-panel toggle
 ```
 
-`right-panel open` shows the right panel in files mode and focuses it. For a file it runs `[right_panel] open_command` (default `micro +{line} {path}; exec yazi {path}`) in a new panel terminal for the file's directory; for a directory it shows the files view there. Relative paths resolve against the current directory, and `PATH:LINE` works when `--line` is not given. The panel stays on the opened file until you focus another pane or tab, or toggle the panel. Run inside a pane, the command passes `HERDR_PANE_ID` automatically.
+The right panel belongs to each pane. `right-panel open` acts on the pane it runs in (`HERDR_PANE_ID`), or on the focused pane otherwise. It switches that pane's panel to files mode; for a file it replaces the pane's files terminal with `[right_panel] open_command` (default `micro +{line} {path}; exec yazi {path}`) run in the file's directory, and for a directory it shows the files view there. If that pane is focused the panel is shown and focused; otherwise it is prepared and appears when you focus the pane. Relative paths resolve against the current directory, and `PATH:LINE` works when `--line` is not given. `right-panel toggle` shows or hides the focused pane's panel.
 
 ## Sessions
 

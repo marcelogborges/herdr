@@ -40,6 +40,15 @@ pub(super) fn snapshot_with_completions(
     let focused_tab_id = location
         .and_then(|location| location.focused_tab_id().map(str::to_owned))
         .or_else(|| snapshot.focused_tab_id.clone());
+    let focused_panel_owner = focused_tab_id
+        .as_deref()
+        .and_then(|tab_id| app.parse_tab_id(tab_id))
+        .and_then(|(workspace_index, tab_index)| {
+            app.state.right_panel_owner(crate::ui::TabSurfaceTarget {
+                workspace_index,
+                tab_index,
+            })
+        });
     let focused_pane_id = focused_tab_id
         .as_deref()
         .and_then(|tab_id| app.parse_tab_id(tab_id))
@@ -280,7 +289,7 @@ pub(super) fn snapshot_with_completions(
         focused_pane_id: app
             .state
             .right_panel
-            .focused_public_id()
+            .focused_public_id(focused_panel_owner)
             .or(focused_pane_id),
         tab_bar_right,
         tab_bar_right_separator: app.state.tab_bar_right_separator.clone(),
@@ -321,10 +330,21 @@ pub(super) fn render_pane_surface(
     graphics_delivery: &crate::kitty_graphics::surface::DeliveryCache,
     client_id: u64,
 ) -> Result<RenderedPaneSurface, SurfaceRenderDeferred> {
-    if let Some(panel) = target.and(app.state.right_panel.panel_rect(area)) {
-        app.sync_right_panel(panel);
+    let panel_owner =
+        |app: &app::App| target.and_then(|target| app.state.right_panel_owner(target));
+    if let (Some(target), Some(panel)) = (
+        target,
+        app.state.right_panel.panel_rect(panel_owner(app), area),
+    ) {
+        app.sync_right_panel(target, panel);
     }
-    let right_panel = target.and(app.state.right_panel.panel_rect(area));
+    let right_panel_owner = panel_owner(app);
+    let right_panel = right_panel_owner.and_then(|owner| {
+        app.state
+            .right_panel
+            .panel_rect(Some(owner), area)
+            .map(|panel| (owner, panel))
+    });
     let layout = crate::ui::compute_tab_surface_for(
         &app.state,
         &app.terminal_runtimes,
@@ -373,8 +393,9 @@ pub(super) fn render_pane_surface(
             layout,
             area,
         );
-    let right_panel_pane = right_panel
-        .and_then(|panel| render_right_panel(app, &mut buffer, &mut cursor, panel, cell_size));
+    let right_panel_pane = right_panel.and_then(|(owner, panel)| {
+        render_right_panel(app, &mut buffer, &mut cursor, owner, panel, cell_size)
+    });
     let right_panel_focused = right_panel_pane.as_ref().is_some_and(|pane| pane.focused);
     let mut panes: Vec<protocol::PaneSurfacePane> = target
         .map(|target| {
@@ -532,13 +553,15 @@ fn render_right_panel(
     app: &app::App,
     buffer: &mut ratatui::buffer::Buffer,
     cursor: &mut Option<protocol::CursorState>,
+    owner: crate::layout::PaneId,
     panel: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> Option<protocol::PaneSurfacePane> {
     use ratatui::style::{Modifier, Style};
 
     let state = &app.state.right_panel;
-    let instance = state.active_instance()?;
+    let pane_state = state.pane(owner)?;
+    let instance = state.displayed(owner)?;
     let runtime = app.terminal_runtimes.get(&instance.terminal_id)?;
     let panel = panel.intersection(buffer.area);
     let content = crate::right_panel::content_rect(panel);
@@ -557,7 +580,7 @@ fn render_right_panel(
     }
 
     let palette = &app.state.palette;
-    let focused = state.focused;
+    let focused = pane_state.focused;
     let edge = Style::default().fg(if focused {
         palette.accent
     } else {
@@ -578,7 +601,7 @@ fn render_right_panel(
     }
     let tabs = crate::right_panel::header_tabs(panel);
     for (mode, rect) in &tabs {
-        let style = if *mode == state.mode {
+        let style = if *mode == pane_state.mode {
             header
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -679,13 +702,17 @@ fn resize_right_panel_terminal(
 
 pub(super) fn resize_right_panel_runtime(
     app: &app::App,
+    target: crate::ui::TabSurfaceTarget,
     area: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
-    let Some(panel) = app.state.right_panel.panel_rect(area) else {
+    let Some(owner) = app.state.right_panel_owner(target) else {
         return;
     };
-    let Some(instance) = app.state.right_panel.active_instance() else {
+    let Some(panel) = app.state.right_panel.panel_rect(Some(owner), area) else {
+        return;
+    };
+    let Some(instance) = app.state.right_panel.displayed(owner) else {
         return;
     };
     let Some(runtime) = app.terminal_runtimes.get(&instance.terminal_id) else {

@@ -126,14 +126,16 @@ diff_command = "lazygit"
 open_command = "micro +{line} {path}; exec yazi {path}"
 ```
 
-The panel opens in the worktree the focused Claude Code session works in when
-Herdr can tell, and otherwise in the focused pane's directory. Herdr keeps one
-panel terminal per tab and directory, so switching agents switches the panel
-too and returning restores where you left off. Clicking the panel focuses it;
-clicking a pane or pressing the prefix works as usual. Drag the panel's left
-edge to resize it; double-click the edge to return to `right_panel_width`. The
-dragged width lasts until the server restarts. Quitting the panel
-command closes that terminal and hides the panel.
+The panel belongs to each pane. Every pane has its own visibility, tab, and
+panel terminals, so focusing a pane that never opened the panel hides it, and
+returning to a pane restores its panel exactly as you left it. A pane's panel
+opens in the worktree its Claude Code session works in when Herdr can tell,
+and otherwise in the pane's directory. Clicking the panel focuses it; clicking
+a pane or pressing the prefix works as usual. Drag the panel's left edge to
+resize it; the width is shared by all panes, and double-clicking the edge
+returns to `right_panel_width`. The dragged width lasts until the server
+restarts. Quitting the panel command closes that terminal and hides that
+pane's panel, and closing a pane closes its panel terminals.
 
 
 Remote attach manages its SSH connection with temporary keepalives and, where supported, connection reuse by default.
