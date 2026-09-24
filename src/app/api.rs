@@ -1086,6 +1086,9 @@ impl App {
             Method::RightPanelShow(params) => {
                 return self.handle_right_panel_show(request.id, params)
             }
+            Method::RightPanelCycle(params) => {
+                return self.handle_right_panel_cycle(request.id, params)
+            }
             Method::RightPanelOpen(params) => {
                 return self.handle_right_panel_open(request.id, params)
             }

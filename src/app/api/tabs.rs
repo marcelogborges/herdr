@@ -154,6 +154,15 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
+    pub(super) fn handle_right_panel_cycle(
+        &mut self,
+        id: String,
+        params: crate::api::schema::RightPanelCycleParams,
+    ) -> String {
+        self.cycle_right_panel(params.direction);
+        encode_success(id, ResponseResult::Ok {})
+    }
+
     pub(super) fn handle_right_panel_open(
         &mut self,
         id: String,

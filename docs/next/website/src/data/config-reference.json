@@ -842,6 +842,18 @@
           "description": "Toggle the focused pane's right files/diff panel."
         },
         {
+          "key": "keys.right_panel_next_mode",
+          "type": "keybinding",
+          "default": "\"alt+q\"",
+          "description": "Switch the focused pane's right panel to the next mode (files, diff, jira), opening it if hidden."
+        },
+        {
+          "key": "keys.right_panel_previous_mode",
+          "type": "keybinding",
+          "default": "\"alt+e\"",
+          "description": "Switch the focused pane's right panel to the previous mode (files, diff, jira), opening it if hidden."
+        },
+        {
           "key": "keys.indexed.tabs",
           "type": "string",
           "default": "unset",

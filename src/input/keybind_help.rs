@@ -182,6 +182,14 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.toggle_right_panel),
                     "toggle files/diff panel",
                 ),
+                entry(
+                    binding_label(&keybinds.right_panel_next_mode),
+                    "right panel next mode",
+                ),
+                entry(
+                    binding_label(&keybinds.right_panel_previous_mode),
+                    "right panel previous mode",
+                ),
                 entry(binding_label(&keybinds.focus_pane_left), "focus pane left"),
                 entry(binding_label(&keybinds.focus_pane_down), "focus pane down"),
                 entry(binding_label(&keybinds.focus_pane_up), "focus pane up"),

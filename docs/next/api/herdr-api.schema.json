@@ -3957,6 +3957,24 @@
           ],
           "type": "object"
         },
+        "RightPanelCycleDirection": {
+          "enum": [
+            "next",
+            "previous"
+          ],
+          "type": "string"
+        },
+        "RightPanelCycleParams": {
+          "properties": {
+            "direction": {
+              "$ref": "#/schemas/request/$defs/RightPanelCycleDirection"
+            }
+          },
+          "required": [
+            "direction"
+          ],
+          "type": "object"
+        },
         "RightPanelMode": {
           "enum": [
             "files",
@@ -5456,6 +5474,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/RightPanelShowParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.cycle",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelCycleParams"
             }
           },
           "required": [

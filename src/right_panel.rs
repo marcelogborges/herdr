@@ -42,6 +42,23 @@ impl RightPanelMode {
             Self::Jira => "jira",
         }
     }
+
+    pub(crate) fn cycled(self, direction: RightPanelCycleDirection) -> Self {
+        let len = Self::ALL.len();
+        let index = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
+        let next = match direction {
+            RightPanelCycleDirection::Next => (index + 1) % len,
+            RightPanelCycleDirection::Previous => (index + len - 1) % len,
+        };
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RightPanelCycleDirection {
+    Next,
+    Previous,
 }
 
 pub(crate) fn default_width() -> PopupSize {

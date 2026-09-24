@@ -469,6 +469,10 @@ pub struct KeysConfig {
     pub toggle_sidebar: BindingConfig,
     /// Toggle the right files/diff panel. Default: "prefix+i"
     pub toggle_right_panel: BindingConfig,
+    /// Switch the right panel to the next mode (files, diff, jira), opening it if hidden. Default: "alt+q"
+    pub right_panel_next_mode: BindingConfig,
+    /// Switch the right panel to the previous mode (files, diff, jira), opening it if hidden. Default: "alt+e"
+    pub right_panel_previous_mode: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
     pub indexed: IndexedKeysConfig,
     /// Prefix-mode custom command bindings.
@@ -603,6 +607,10 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     toggle_right_panel: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    right_panel_next_mode: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    right_panel_previous_mode: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
@@ -692,6 +700,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(resize_pane_right);
         apply_field!(toggle_sidebar);
         apply_field!(toggle_right_panel);
+        apply_field!(right_panel_next_mode);
+        apply_field!(right_panel_previous_mode);
         apply_field!(indexed);
         apply_field!(command);
 
@@ -798,6 +808,11 @@ impl KeysConfig {
         copy_effective_action_field!(resize_pane_right, keybinds.resize_pane_right);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
         copy_effective_action_field!(toggle_right_panel, keybinds.toggle_right_panel);
+        copy_effective_action_field!(right_panel_next_mode, keybinds.right_panel_next_mode);
+        copy_effective_action_field!(
+            right_panel_previous_mode,
+            keybinds.right_panel_previous_mode
+        );
         copy_user_field!(indexed);
 
         profile
@@ -1267,6 +1282,8 @@ impl Default for KeysConfig {
             resize_pane_right: BindingConfig::empty(),
             toggle_sidebar: BindingConfig::one("prefix+b"),
             toggle_right_panel: BindingConfig::one("prefix+i"),
+            right_panel_next_mode: BindingConfig::one("alt+q"),
+            right_panel_previous_mode: BindingConfig::one("alt+e"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
             user_fields: BTreeSet::new(),

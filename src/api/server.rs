@@ -522,6 +522,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::ClaudeSessionList(_) => "claude_session.list",
         Method::RightPanelToggle(_) => "right_panel.toggle",
         Method::RightPanelShow(_) => "right_panel.show",
+        Method::RightPanelCycle(_) => "right_panel.cycle",
         Method::RightPanelOpen(_) => "right_panel.open",
         Method::RightPanelSetWidth(_) => "right_panel.set_width",
         Method::AgentList(_) => "agent.list",

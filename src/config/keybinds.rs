@@ -371,6 +371,8 @@ pub struct Keybinds {
     pub resize_pane_right: ActionKeybinds,
     pub toggle_sidebar: ActionKeybinds,
     pub toggle_right_panel: ActionKeybinds,
+    pub right_panel_next_mode: ActionKeybinds,
+    pub right_panel_previous_mode: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
 }
 
@@ -541,6 +543,8 @@ impl Config {
             resize_pane_right: empty_action!(),
             toggle_sidebar: empty_action!(),
             toggle_right_panel: empty_action!(),
+            right_panel_next_mode: empty_action!(),
+            right_panel_previous_mode: empty_action!(),
             custom_commands: Vec::new(),
         };
 
@@ -690,6 +694,16 @@ impl Config {
             apply_action!(keybinds.resize_pane_right, resize_pane_right, source);
             apply_action!(keybinds.toggle_sidebar, toggle_sidebar, source);
             apply_action!(keybinds.toggle_right_panel, toggle_right_panel, source);
+            apply_action!(
+                keybinds.right_panel_next_mode,
+                right_panel_next_mode,
+                source
+            );
+            apply_action!(
+                keybinds.right_panel_previous_mode,
+                right_panel_previous_mode,
+                source
+            );
 
             if source == field_source!(indexed) {
                 append_legacy_indexed_bindings(
