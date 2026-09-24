@@ -377,7 +377,7 @@ impl JiraState {
                 } = &mut self.view
                 {
                     if *key == detail.issue.key {
-                        *slot = Some(Box::new(detail));
+                        *slot = Some(detail);
                         *error = None;
                     }
                 }

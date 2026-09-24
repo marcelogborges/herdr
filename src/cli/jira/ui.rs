@@ -1032,7 +1032,7 @@ mod tests {
                 repository: "vakinha/vakinha-web".into(),
             }],
         };
-        state.apply(Outcome::Detail(detail));
+        state.apply(Outcome::Detail(Box::new(detail)));
         let terminal = draw(&mut state, 70, 30);
         let text = screen(&terminal);
 

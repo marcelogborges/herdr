@@ -38,7 +38,7 @@ pub(crate) enum Outcome {
         pane_status: HashMap<String, String>,
     },
     ListFailed(String),
-    Detail(IssueDetail),
+    Detail(Box<IssueDetail>),
     DetailFailed {
         key: String,
         error: String,
@@ -127,7 +127,7 @@ impl Worker {
                 Err(err) => Outcome::ListFailed(err.to_string()),
             },
             Job::Detail(key) => match api.issue_detail(&key) {
-                Ok(detail) => Outcome::Detail(detail),
+                Ok(detail) => Outcome::Detail(Box::new(detail)),
                 Err(err) => Outcome::DetailFailed {
                     key,
                     error: err.to_string(),
