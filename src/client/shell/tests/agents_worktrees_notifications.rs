@@ -1462,3 +1462,55 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
     assert_eq!(state.pending_notifications.len(), 1);
 }
+
+#[test]
+fn claude_session_rows_mark_live_sessions_and_show_folder_and_age() {
+    let mut snapshot = snapshot();
+    snapshot.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "workspace_1".into(),
+        tab_id: "tab_1".into(),
+        name: None,
+        display_agent: None,
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Working,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    }];
+    snapshot.claude_sessions = vec![
+        crate::protocol::ClientShellClaudeSession {
+            session_id: "live".into(),
+            title: "live session".into(),
+            cwd: "/home/me/projects".into(),
+            context: String::new(),
+            updated_at_ms: 10_000_000,
+            pane_id: Some("pane_1".into()),
+        },
+        crate::protocol::ClientShellClaudeSession {
+            session_id: "closed".into(),
+            title: "closed session".into(),
+            cwd: "/home/me/tcc".into(),
+            context: "VK25-2904".into(),
+            updated_at_ms: 10_000_000 - 2 * 3_600_000,
+            pane_id: None,
+        },
+    ];
+    let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(10_000_000 + 5 * 60_000);
+
+    let rows = super::agent_sidebar::claude_session_rows(&snapshot, now);
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].status, Some(AgentStatus::Working));
+    assert!(rows[0].focused);
+    assert_eq!(rows[0].detail, "projects · 5m");
+    assert_eq!(rows[0].hit.pane_id.as_deref(), Some("pane_1"));
+    assert_eq!(rows[1].status, None);
+    assert!(!rows[1].focused);
+    assert_eq!(rows[1].detail, "VK25-2904 · 2h");
+    assert_eq!(rows[1].hit.session_id, "closed");
+}

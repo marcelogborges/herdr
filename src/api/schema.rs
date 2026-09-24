@@ -115,6 +115,8 @@ pub enum Method {
     TabMove(TabMoveParams),
     #[serde(rename = "tab.close")]
     TabClose(TabTarget),
+    #[serde(rename = "claude_session.open")]
+    ClaudeSessionOpen(ClaudeSessionOpenParams),
     #[serde(rename = "agent.list")]
     AgentList(EmptyParams),
     #[serde(rename = "agent.get")]

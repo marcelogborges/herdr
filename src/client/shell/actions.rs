@@ -364,7 +364,8 @@ impl ClientShellState {
             crate::api::schema::Method::WorkspaceFocus(_)
             | crate::api::schema::Method::TabFocus(_)
             | crate::api::schema::Method::PaneFocus(_)
-            | crate::api::schema::Method::PaneFocusDirection(_) => true,
+            | crate::api::schema::Method::PaneFocusDirection(_)
+            | crate::api::schema::Method::ClaudeSessionOpen(_) => true,
             crate::api::schema::Method::WorkspaceCreate(params) => params.focus,
             crate::api::schema::Method::TabCreate(params) => params.focus,
             crate::api::schema::Method::PaneSplit(params) => params.focus,

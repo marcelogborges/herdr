@@ -1695,6 +1695,23 @@
           ],
           "type": "object"
         },
+        "ClaudeSessionOpenParams": {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "session_id"
+          ],
+          "type": "object"
+        },
         "ClientShellSurfaceSetParams": {
           "description": "Updates whether the requesting client shell receives and controls pane presentation.",
           "properties": {
@@ -5317,6 +5334,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "claude_session.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/ClaudeSessionOpenParams"
             }
           },
           "required": [

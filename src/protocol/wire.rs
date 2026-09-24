@@ -954,6 +954,22 @@ pub struct ClientShellSnapshot {
     pub panes: Vec<ClientShellPane>,
     pub agents: Vec<ClientShellAgent>,
     pub commands: Vec<ClientShellCommand>,
+    /// Recent Claude Code sessions read from the endpoint's Claude config directory.
+    #[serde(default)]
+    pub claude_sessions: Vec<ClientShellClaudeSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellClaudeSession {
+    pub session_id: String,
+    pub title: String,
+    pub cwd: String,
+    /// Worktree or task code the session works on, falling back to the cwd name.
+    #[serde(default)]
+    pub context: String,
+    pub updated_at_ms: u64,
+    /// Pane currently running this session, when one reported it.
+    pub pane_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2746,6 +2762,14 @@ mod tests {
                 binding_labels: vec!["prefix+z".into()],
                 action: ClientShellCommandAction::Shell,
                 description: Some("deploy".into()),
+            }],
+            claude_sessions: vec![ClientShellClaudeSession {
+                session_id: "0da32074-acd6-4c79-9d29-aac5cc63ca81".into(),
+                title: "resume me".into(),
+                cwd: "/repo".into(),
+                context: "repo".into(),
+                updated_at_ms: 1_700_000_000_000,
+                pane_id: Some("w1:p1".into()),
             }],
         }));
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();

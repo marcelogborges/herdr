@@ -162,6 +162,7 @@ pub struct App {
     pub(crate) config_reloaded_from_disk: bool,
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
+    pub(crate) claude_sessions: crate::claude_sessions::ClaudeSessionIndex,
 }
 
 pub(crate) const APP_EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -195,7 +196,8 @@ fn agent_panel_sort_from_config(
     sort: crate::config::AgentPanelSortConfig,
 ) -> state::AgentPanelSort {
     match sort {
-        crate::config::AgentPanelSortConfig::Spaces => state::AgentPanelSort::Spaces,
+        crate::config::AgentPanelSortConfig::Spaces
+        | crate::config::AgentPanelSortConfig::Sessions => state::AgentPanelSort::Spaces,
         crate::config::AgentPanelSortConfig::Priority => state::AgentPanelSort::Priority,
     }
 }
@@ -358,6 +360,14 @@ pub(crate) fn client_palette_for_appearance(
 }
 
 impl App {
+    pub(crate) fn start_claude_session_scanner(&self) {
+        crate::claude_sessions::spawn_scanner(
+            self.claude_sessions.clone(),
+            self.render_dirty.clone(),
+            self.render_notify.clone(),
+        );
+    }
+
     pub fn new(
         config: &Config,
         policy: AppPolicy,
@@ -632,6 +642,7 @@ impl App {
             config_reloaded_from_disk: false,
             client_shell_keybindings_profile,
             endpoint_commands,
+            claude_sessions: Default::default(),
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);

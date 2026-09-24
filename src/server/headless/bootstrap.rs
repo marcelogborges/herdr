@@ -61,6 +61,7 @@ pub fn run_server() -> io::Result<()> {
             event_hub,
         );
         seed_startup_workspace_if_empty(&mut app);
+        app.start_claude_session_scanner();
 
         // Create the headless server.
         let mut server = match HeadlessServer::new(

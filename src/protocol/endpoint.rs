@@ -242,6 +242,7 @@ mod tests {
             panes: Vec::new(),
             agents: Vec::new(),
             commands: Vec::new(),
+            claude_sessions: Vec::new(),
         }
     }
 
@@ -287,6 +288,7 @@ mod tests {
             snapshot.workspaces[0].agent_status,
             crate::api::schema::AgentStatus::Unknown
         );
+        assert!(snapshot.claude_sessions.is_empty());
     }
 
     #[test]
