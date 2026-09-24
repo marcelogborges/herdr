@@ -7,7 +7,10 @@ use crate::app::state::AppState;
 use crate::app::App;
 use crate::layout::PaneId;
 use crate::pane::PaneLaunchEnv;
-use crate::right_panel::{self, RightPanelInstance, RightPanelMode, MAX_INSTANCES};
+use crate::right_panel::{
+    self, RightPanelCycleDirection, RightPanelInstance, RightPanelMode, MAX_INSTANCES,
+    PANEL_OWNER_PANE_ENV,
+};
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 use crate::ui::TabSurfaceTarget;
 
@@ -60,6 +63,20 @@ impl App {
         pane.mode = mode;
         pane.visible = true;
         pane.focused = true;
+        self.request_right_panel_render();
+    }
+
+    pub(crate) fn cycle_right_panel(&mut self, direction: RightPanelCycleDirection) {
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        self.release_exited_right_panel_instances(owner);
+        let pane = self.state.right_panel.pane_mut(owner);
+        pane.mode = pane.mode.cycled(direction);
+        if !pane.visible {
+            pane.visible = true;
+            pane.focused = true;
+        }
         self.request_right_panel_render();
     }
 
@@ -335,8 +352,14 @@ impl App {
     ) -> std::io::Result<RightPanelInstance> {
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
-        let launch_env =
-            PaneLaunchEnv::from_extra(self.custom_command_env().0).without_pane_identity();
+        let mut extra_env = self.custom_command_env().0;
+        if let Some(owner_id) = self
+            .find_pane(owner)
+            .and_then(|(ws_idx, _)| self.public_pane_id(ws_idx, owner))
+        {
+            extra_env.push((PANEL_OWNER_PANE_ENV.to_owned(), owner_id));
+        }
+        let launch_env = PaneLaunchEnv::from_extra(extra_env).without_pane_identity();
         let runtime = TerminalRuntime::spawn_shell_command(
             pane_id,
             rows.max(1),
@@ -501,6 +524,95 @@ mod tests {
         assert_eq!(
             app.state.right_panel.pane(b).unwrap().mode,
             RightPanelMode::Files
+        );
+    }
+
+    #[test]
+    fn cycle_next_walks_the_header_order_and_wraps() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        app.show_right_panel(RightPanelMode::Files);
+
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            app.cycle_right_panel(RightPanelCycleDirection::Next);
+            seen.push(app.state.right_panel.pane(owner).unwrap().mode);
+        }
+
+        assert_eq!(
+            seen,
+            vec![
+                RightPanelMode::Diff,
+                RightPanelMode::Jira,
+                RightPanelMode::Files
+            ]
+        );
+    }
+
+    #[test]
+    fn cycle_previous_walks_backwards_and_wraps() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        app.show_right_panel(RightPanelMode::Files);
+
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            app.cycle_right_panel(RightPanelCycleDirection::Previous);
+            seen.push(app.state.right_panel.pane(owner).unwrap().mode);
+        }
+
+        assert_eq!(
+            seen,
+            vec![
+                RightPanelMode::Jira,
+                RightPanelMode::Diff,
+                RightPanelMode::Files
+            ]
+        );
+    }
+
+    #[test]
+    fn cycle_opens_a_hidden_panel_focused_at_the_resulting_mode() {
+        let mut app = test_app();
+        let owner = focused(&app);
+
+        app.cycle_right_panel(RightPanelCycleDirection::Next);
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && pane.focused);
+        assert_eq!(pane.mode, RightPanelMode::Diff);
+    }
+
+    #[test]
+    fn cycle_on_a_visible_panel_keeps_keyboard_focus_where_it_is() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        app.show_right_panel(RightPanelMode::Files);
+        app.blur_right_panel();
+
+        app.cycle_right_panel(RightPanelCycleDirection::Next);
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && !pane.focused);
+        assert_eq!(pane.mode, RightPanelMode::Diff);
+    }
+
+    #[test]
+    fn cycle_only_changes_the_focused_pane_mode() {
+        let mut app = test_app();
+        let (a, b) = split(&mut app);
+        app.show_right_panel(RightPanelMode::Diff);
+        app.state.focus_pane_in_workspace(0, b);
+
+        app.cycle_right_panel(RightPanelCycleDirection::Previous);
+
+        assert_eq!(
+            app.state.right_panel.pane(a).unwrap().mode,
+            RightPanelMode::Diff
+        );
+        assert_eq!(
+            app.state.right_panel.pane(b).unwrap().mode,
+            RightPanelMode::Jira
         );
     }
 

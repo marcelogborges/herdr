@@ -28,6 +28,23 @@ impl ClientShellState {
                     outcome,
                 );
             }
+            crate::input::KeybindMatch::Action(
+                action @ (crate::input::KeybindAction::RightPanelNextMode
+                | crate::input::KeybindAction::RightPanelPreviousMode),
+            ) => {
+                let direction = if action == crate::input::KeybindAction::RightPanelNextMode {
+                    crate::right_panel::RightPanelCycleDirection::Next
+                } else {
+                    crate::right_panel::RightPanelCycleDirection::Previous
+                };
+                self.mode = ClientShellMode::Terminal;
+                self.push_endpoint_method(
+                    crate::api::schema::Method::RightPanelCycle(
+                        crate::api::schema::RightPanelCycleParams { direction },
+                    ),
+                    outcome,
+                );
+            }
             crate::input::KeybindMatch::Action(action) => {
                 if self.workspace_preview_action_blocked()
                     && matches!(

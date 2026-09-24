@@ -193,6 +193,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
 # toggle_sidebar = "prefix+b"
 # toggle_right_panel = "prefix+i"
+# right_panel_next_mode = "alt+q"
+# right_panel_previous_mode = "alt+e"
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
@@ -232,11 +234,21 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [worktrees]
 # directory = "~/.herdr/worktrees"
 
-# Right files/diff panel (prefix+i). Commands run in the focused agent's worktree.
+# Right files/diff/jira panel (prefix+i). Commands run in the focused agent's worktree.
 # [right_panel]
 # files_command = "yazi"
 # diff_command = "lazygit"
 # open_command = "micro +{line} {path}; exec yazi {path}"
+# jira_command = '"$HERDR_BIN_PATH" jira'
+
+# Jira board shown in the right panel's jira tab.
+# [jira]
+# site = "https://example.atlassian.net"
+# email = "you@example.com"
+# project = "ABC"
+# token_env = "JIRA_API_TOKEN"
+# refresh_seconds = 60
+# worktree_gc_command = "vk-wt gc"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)

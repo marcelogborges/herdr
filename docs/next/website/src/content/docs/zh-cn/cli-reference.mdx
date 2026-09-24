@@ -139,9 +139,12 @@ herdr notification show <title> [--body TEXT] [--position top-left|top-right|bot
 ```bash
 herdr right-panel open <PATH> [--line N]
 herdr right-panel toggle
+herdr jira
 ```
 
 右侧面板按窗格独立。`right-panel open` 作用于运行它的窗格（`HERDR_PANE_ID`），否则作用于当前聚焦的窗格，并把该窗格的面板切换到文件模式。对于文件，它会用在文件所在目录运行的 `[right_panel] open_command`（默认 `micro +{line} {path}; exec yazi {path}`）替换该窗格的文件终端；对于目录，则在该目录打开文件视图。若该窗格已聚焦，则显示并聚焦面板；否则只做准备，在你聚焦该窗格时出现。相对路径按当前目录解析，未提供 `--line` 时也支持 `PATH:LINE`。`right-panel toggle` 显示或隐藏当前聚焦窗格的面板。
+
+`herdr jira` 是右侧面板 `jira` 标签运行的交互式 Jira 看板（`[right_panel] jira_command`）。它按状态列出你未完成的问题，可用键盘和鼠标执行流转、评论、指派给自己、在浏览器中打开，以及跳转到关联的 Claude Code 会话或工作树。配置读取 `[jira]`，API 令牌读取 `[jira] token_env` 指定的环境变量。
 
 ## 会话
 

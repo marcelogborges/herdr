@@ -14,6 +14,7 @@ pub(crate) const MAX_INSTANCES: usize = 16;
 pub(crate) const FAILED_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 const MIN_PANEL_COLS: u16 = 20;
 const MIN_TAB_COLS: u16 = 20;
+pub(crate) const PANEL_OWNER_PANE_ENV: &str = "HERDR_PANEL_OWNER_PANE_ID";
 const DEFAULT_WIDTH_PERCENT: u8 = 45;
 
 #[derive(
@@ -24,17 +25,40 @@ pub enum RightPanelMode {
     #[default]
     Files,
     Diff,
+    Jira,
 }
 
 impl RightPanelMode {
-    pub(crate) const ALL: [RightPanelMode; 2] = [RightPanelMode::Files, RightPanelMode::Diff];
+    pub(crate) const ALL: [RightPanelMode; 3] = [
+        RightPanelMode::Files,
+        RightPanelMode::Diff,
+        RightPanelMode::Jira,
+    ];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Files => "files",
             Self::Diff => "diff",
+            Self::Jira => "jira",
         }
     }
+
+    pub(crate) fn cycled(self, direction: RightPanelCycleDirection) -> Self {
+        let len = Self::ALL.len();
+        let index = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
+        let next = match direction {
+            RightPanelCycleDirection::Next => (index + 1) % len,
+            RightPanelCycleDirection::Previous => (index + len - 1) % len,
+        };
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RightPanelCycleDirection {
+    Next,
+    Previous,
 }
 
 pub(crate) fn default_width() -> PopupSize {
@@ -136,6 +160,7 @@ pub(crate) struct RightPanelState {
     pub files_command: String,
     pub diff_command: String,
     pub open_command: String,
+    pub jira_command: String,
     pub panes: std::collections::HashMap<PaneId, PanePanel>,
     pub instances: Vec<RightPanelInstance>,
 }
@@ -149,6 +174,7 @@ impl Default for RightPanelState {
             files_command: config.files_command,
             diff_command: config.diff_command,
             open_command: config.open_command,
+            jira_command: config.jira_command,
             panes: std::collections::HashMap::new(),
             instances: Vec::new(),
         }
@@ -161,12 +187,14 @@ impl RightPanelState {
         self.files_command = config.files_command.clone();
         self.diff_command = config.diff_command.clone();
         self.open_command = config.open_command.clone();
+        self.jira_command = config.jira_command.clone();
     }
 
     pub(crate) fn command(&self, mode: RightPanelMode) -> &str {
         match mode {
             RightPanelMode::Files => &self.files_command,
             RightPanelMode::Diff => &self.diff_command,
+            RightPanelMode::Jira => &self.jira_command,
         }
     }
 
@@ -442,6 +470,7 @@ mod tests {
             vec![
                 (RightPanelMode::Files, Rect::new(62, 0, 7, 1)),
                 (RightPanelMode::Diff, Rect::new(70, 0, 6, 1)),
+                (RightPanelMode::Jira, Rect::new(77, 0, 6, 1)),
             ]
         );
     }

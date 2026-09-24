@@ -62,6 +62,8 @@ pub(crate) enum KeybindAction {
     ResizePaneRight,
     ToggleSidebar,
     ToggleRightPanel,
+    RightPanelNextMode,
+    RightPanelPreviousMode,
     CyclePaneNext,
     CyclePanePrevious,
     LastPane,
@@ -151,6 +153,14 @@ pub(crate) fn resolve_non_indexed_action(
         (
             &keybinds.toggle_right_panel,
             KeybindAction::ToggleRightPanel,
+        ),
+        (
+            &keybinds.right_panel_next_mode,
+            KeybindAction::RightPanelNextMode,
+        ),
+        (
+            &keybinds.right_panel_previous_mode,
+            KeybindAction::RightPanelPreviousMode,
         ),
         (&keybinds.reload_config, KeybindAction::ReloadConfig),
         (

@@ -121,6 +121,63 @@ fn prefix_i_toggles_the_right_panel() {
     assert_eq!(state.mode, ClientShellMode::Terminal);
 }
 
+fn sent_cycle_directions(
+    input: &ClientShellInput,
+) -> Vec<crate::right_panel::RightPanelCycleDirection> {
+    endpoint_methods(input)
+        .into_iter()
+        .filter_map(|method| match method {
+            crate::api::schema::Method::RightPanelCycle(params) => Some(params.direction),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn alt_q_and_alt_e_cycle_the_right_panel_mode() {
+    let mut state = state_with_panel();
+
+    let next = state.handle_raw_events(vec![RawInputEvent::Key(TerminalKey::new(
+        KeyCode::Char('q'),
+        KeyModifiers::ALT,
+    ))]);
+    let previous = state.handle_raw_events(vec![RawInputEvent::Key(TerminalKey::new(
+        KeyCode::Char('e'),
+        KeyModifiers::ALT,
+    ))]);
+
+    assert_eq!(
+        sent_cycle_directions(&next),
+        vec![crate::right_panel::RightPanelCycleDirection::Next]
+    );
+    assert_eq!(
+        sent_cycle_directions(&previous),
+        vec![crate::right_panel::RightPanelCycleDirection::Previous]
+    );
+}
+
+#[test]
+fn alt_q_cycles_instead_of_typing_when_the_panel_has_focus() {
+    let mut state = state_with_panel();
+    let mut focused = snapshot();
+    focused.focused_pane_id = Some(PANEL_ID.into());
+    state.set_snapshot(Box::new(focused));
+
+    let input = state.handle_raw_events(vec![RawInputEvent::Key(TerminalKey::new(
+        KeyCode::Char('q'),
+        KeyModifiers::ALT,
+    ))]);
+
+    assert_eq!(
+        sent_cycle_directions(&input),
+        vec![crate::right_panel::RightPanelCycleDirection::Next]
+    );
+    assert!(!input
+        .requests
+        .iter()
+        .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. })));
+}
+
 #[test]
 fn typing_goes_to_the_panel_when_the_snapshot_focuses_it() {
     let mut state = state_with_panel();

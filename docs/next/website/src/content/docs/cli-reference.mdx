@@ -143,9 +143,12 @@ herdr notification show <title> [--body TEXT] [--position top-left|top-right|bot
 ```bash
 herdr right-panel open <PATH> [--line N]
 herdr right-panel toggle
+herdr jira
 ```
 
 The right panel belongs to each pane. `right-panel open` acts on the pane it runs in (`HERDR_PANE_ID`), or on the focused pane otherwise. It switches that pane's panel to files mode; for a file it replaces the pane's files terminal with `[right_panel] open_command` (default `micro +{line} {path}; exec yazi {path}`) run in the file's directory, and for a directory it shows the files view there. If that pane is focused the panel is shown and focused; otherwise it is prepared and appears when you focus the pane. Relative paths resolve against the current directory, and `PATH:LINE` works when `--line` is not given. `right-panel toggle` shows or hides the focused pane's panel.
+
+`herdr jira` is the interactive Jira board that the panel's `jira` tab runs (`[right_panel] jira_command`). It lists your open issues grouped by status, preselects the issue linked to the pane that owns the panel, and supports moving through workflow transitions, commenting, assigning to yourself, opening in the browser, and jumping to the issue's Claude Code session or worktree, by keyboard or mouse. It reads `[jira]` from the config and the API token from the environment variable named by `[jira] token_env`.
 
 ## Sessions
 

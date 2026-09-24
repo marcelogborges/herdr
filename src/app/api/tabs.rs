@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::api::schema::{
-    ClaudeSessionOpenParams, EventData, EventEnvelope, EventKind, PaneTarget, ResponseResult,
-    TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabTarget,
+    ClaudeSessionInfo, ClaudeSessionOpenParams, EventData, EventEnvelope, EventKind, PaneTarget,
+    ResponseResult, TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -151,6 +151,15 @@ impl App {
         params: crate::api::schema::RightPanelShowParams,
     ) -> String {
         self.show_right_panel(params.mode);
+        encode_success(id, ResponseResult::Ok {})
+    }
+
+    pub(super) fn handle_right_panel_cycle(
+        &mut self,
+        id: String,
+        params: crate::api::schema::RightPanelCycleParams,
+    ) -> String {
+        self.cycle_right_panel(params.direction);
         encode_success(id, ResponseResult::Ok {})
     }
 
@@ -434,6 +443,27 @@ impl App {
             }
         }
         response
+    }
+
+    pub(super) fn handle_claude_session_list(&mut self, id: String) -> String {
+        let sessions = self
+            .claude_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let sessions = sessions
+            .into_iter()
+            .map(|session| ClaudeSessionInfo {
+                pane_id: self.live_claude_session_pane_id(&session.session_id),
+                session_id: session.session_id,
+                title: session.title,
+                cwd: session.cwd,
+                context: session.context,
+                worktree_path: session.worktree_path,
+                updated_at_ms: session.updated_at_ms,
+            })
+            .collect();
+        encode_success(id, ResponseResult::ClaudeSessionList { sessions })
     }
 
     fn live_claude_session_pane_id(&self, session_id: &str) -> Option<String> {

@@ -117,10 +117,14 @@ pub enum Method {
     TabClose(TabTarget),
     #[serde(rename = "claude_session.open")]
     ClaudeSessionOpen(ClaudeSessionOpenParams),
+    #[serde(rename = "claude_session.list")]
+    ClaudeSessionList(EmptyParams),
     #[serde(rename = "right_panel.toggle")]
     RightPanelToggle(EmptyParams),
     #[serde(rename = "right_panel.show")]
     RightPanelShow(RightPanelShowParams),
+    #[serde(rename = "right_panel.cycle")]
+    RightPanelCycle(RightPanelCycleParams),
     #[serde(rename = "right_panel.open")]
     RightPanelOpen(RightPanelOpenParams),
     #[serde(rename = "right_panel.set_width")]

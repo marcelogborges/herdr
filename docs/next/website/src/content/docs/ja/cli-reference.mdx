@@ -139,9 +139,12 @@ herdr notification show <title> [--body TEXT] [--position top-left|top-right|bot
 ```bash
 herdr right-panel open <PATH> [--line N]
 herdr right-panel toggle
+herdr jira
 ```
 
 右パネルはペインごとに独立しています。`right-panel open` は実行されたペイン（`HERDR_PANE_ID`）、なければフォーカス中のペインに作用し、そのペインのパネルをファイルモードにします。ファイルの場合はそのペインのファイル端末を、ファイルのディレクトリで実行する `[right_panel] open_command`（既定値 `micro +{line} {path}; exec yazi {path}`）に置き換え、ディレクトリの場合はそこでファイル表示を開きます。そのペインがフォーカス中ならパネルを表示してフォーカスし、そうでなければ準備だけしてペインにフォーカスしたときに表示します。相対パスは現在のディレクトリを基準に解決され、`--line` がない場合は `PATH:LINE` も使えます。`right-panel toggle` はフォーカス中のペインのパネルを表示・非表示にします。
+
+`herdr jira` は右パネルの `jira` タブが実行する対話型の Jira ボードです（`[right_panel] jira_command`）。自分の未完了課題をステータスごとに表示し、キーボードとマウスでトランジション、コメント、自分への割り当て、ブラウザで開く、関連する Claude Code セッションやワークツリーへの移動ができます。設定は `[jira]`、API トークンは `[jira] token_env` で指定した環境変数から読みます。
 
 ## セッション
 

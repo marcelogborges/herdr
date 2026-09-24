@@ -17,7 +17,7 @@ use super::plugins::{
 };
 use super::server::ServerCapabilities;
 use super::session::SessionSnapshot;
-use super::tabs::TabInfo;
+use super::tabs::{ClaudeSessionInfo, TabInfo};
 use super::workspaces::WorkspaceInfo;
 use super::worktrees::{WorktreeInfo, WorktreeSourceInfo};
 
@@ -93,6 +93,9 @@ pub enum ResponseResult {
     },
     TabList {
         tabs: Vec<TabInfo>,
+    },
+    ClaudeSessionList {
+        sessions: Vec<ClaudeSessionInfo>,
     },
     AgentInfo {
         agent: AgentInfo,
