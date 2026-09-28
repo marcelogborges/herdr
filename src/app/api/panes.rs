@@ -222,20 +222,25 @@ impl App {
         }
     }
 
+    fn selection_runtime(
+        &self,
+        public_id: &str,
+    ) -> Option<(PaneId, &crate::terminal::TerminalRuntime)> {
+        if crate::right_panel::parse_public_id(public_id).is_some() {
+            return self.right_panel_pane_runtime(public_id);
+        }
+        let (ws_idx, pane_id) = self.parse_pane_id(public_id)?;
+        let runtime =
+            self.state
+                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)?;
+        Some((pane_id, runtime))
+    }
+
     pub(crate) fn pane_selection_text(
         &self,
         params: &PaneSelectionReadParams,
     ) -> Result<String, (&'static str, String)> {
-        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
-            return Err((
-                "pane_not_found",
-                format!("pane not found: {}", params.pane_id),
-            ));
-        };
-        let Some(runtime) =
-            self.state
-                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)
-        else {
+        let Some((pane_id, runtime)) = self.selection_runtime(&params.pane_id) else {
             return Err((
                 "pane_not_found",
                 format!("pane not found: {}", params.pane_id),
@@ -287,13 +292,7 @@ impl App {
         id: String,
         params: PaneCopyMotionParams,
     ) -> String {
-        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        let Some(runtime) =
-            self.state
-                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)
-        else {
+        let Some((pane_id, runtime)) = self.selection_runtime(&params.pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
         let before = runtime.content_seq();
@@ -402,13 +401,7 @@ impl App {
         id: String,
         params: PaneCopySearchParams,
     ) -> String {
-        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        let Some(runtime) =
-            self.state
-                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)
-        else {
+        let Some((_, runtime)) = self.selection_runtime(&params.pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
         const MAX_QUERY_BYTES: usize = 4096;

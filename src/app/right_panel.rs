@@ -184,6 +184,16 @@ impl App {
         self.terminal_runtimes.get(&instance.terminal_id)
     }
 
+    pub(crate) fn right_panel_pane_runtime(
+        &self,
+        public_id: &str,
+    ) -> Option<(PaneId, &TerminalRuntime)> {
+        let terminal_id = right_panel::parse_public_id(public_id)?;
+        let instance = self.state.right_panel.owns_terminal(terminal_id)?;
+        let runtime = self.terminal_runtimes.get(&instance.terminal_id)?;
+        Some((instance.pane_id, runtime))
+    }
+
     pub(crate) fn right_panel_pane_died(&mut self, pane_id: PaneId) -> bool {
         let Some(exit) = self
             .state
@@ -1009,6 +1019,24 @@ mod tests {
             app.state.right_panel.effective_width(),
             app.state.right_panel.width
         );
+    }
+
+    #[tokio::test]
+    async fn pane_selection_text_reads_right_panel_terminal() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        let instance = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+        app.terminal_runtimes.insert(
+            instance.terminal_id.clone(),
+            TerminalRuntime::test_with_scrollback_bytes(20, 5, 1000, b"hello world"),
+        );
+        let params = crate::api::schema::PaneSelectionReadParams {
+            pane_id: right_panel::public_id(&instance.terminal_id),
+            anchor: crate::api::schema::PaneTextPoint { row: 0, col: 0 },
+            cursor: crate::api::schema::PaneTextPoint { row: 0, col: 4 },
+            content_revision: None,
+        };
+        assert_eq!(app.pane_selection_text(&params).unwrap(), "hello");
     }
 
     #[test]
