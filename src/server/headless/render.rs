@@ -23,6 +23,9 @@ impl HeadlessServer {
             .tabs
             .get(target.tab_index)?;
         let pane_id = tab.layout.focused();
+        if let Some((panel_pane_id, runtime)) = self.app.focused_right_panel_runtime(pane_id) {
+            return Some((runtime, panel_pane_id));
+        }
         self.app
             .state
             .runtime_for_pane_in_workspace(
