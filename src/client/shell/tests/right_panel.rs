@@ -362,3 +362,174 @@ fn pressing_inside_the_panel_does_not_start_a_width_drag() {
         Some(ClientChromeDrag::RightPanelWidth { .. })
     ));
 }
+
+fn state_with_reporting_panel(sgr_pixel_mouse: bool) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut surface = surface();
+    let mut panel = panel_pane();
+    panel.mouse_reporting = true;
+    panel.sgr_pixel_mouse = sgr_pixel_mouse;
+    panel.pixel_width = 290;
+    panel.pixel_height = 180;
+    surface.panes.push(panel);
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("pane frame");
+    state
+}
+
+fn panel_mouse_inputs(
+    input: &ClientShellInput,
+) -> Vec<(crate::protocol::ClientMouseKind, ClientMousePosition)> {
+    input
+        .requests
+        .iter()
+        .filter_map(|request| match request {
+            ClientMessage::ClientShellPaneInput { pane_id, events } if pane_id == PANEL_ID => {
+                Some(events)
+            }
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|event| match event {
+            ClientPaneInputEvent::Mouse { kind, position, .. } => Some((*kind, *position)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn reporting_panel_receives_the_whole_drag_in_content_cells_without_a_selection() {
+    let mut state = state_with_reporting_panel(false);
+    let hit = panel_hit(&state);
+    let (x, y) = (hit.inner_rect.x, hit.inner_rect.y);
+    let left = crate::protocol::ClientMouseButton::Left;
+
+    let press = mouse(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        x + 2,
+        y + 2,
+    );
+    let drag = mouse(
+        &mut state,
+        MouseEventKind::Drag(MouseButton::Left),
+        x + 4,
+        y + 3,
+    );
+    let outside = mouse(
+        &mut state,
+        MouseEventKind::Drag(MouseButton::Left),
+        x - 5,
+        y + 3,
+    );
+    let release = mouse(
+        &mut state,
+        MouseEventKind::Up(MouseButton::Left),
+        x - 6,
+        y + 3,
+    );
+
+    assert_eq!(
+        panel_mouse_inputs(&press),
+        [(
+            crate::protocol::ClientMouseKind::Down(left),
+            ClientMousePosition::Cell { column: 2, row: 2 }
+        )]
+    );
+    assert_eq!(
+        panel_mouse_inputs(&drag),
+        [(
+            crate::protocol::ClientMouseKind::Drag(left),
+            ClientMousePosition::Cell { column: 4, row: 3 }
+        )]
+    );
+    assert_eq!(
+        panel_mouse_inputs(&outside),
+        [(
+            crate::protocol::ClientMouseKind::Drag(left),
+            ClientMousePosition::Cell { column: 0, row: 3 }
+        )]
+    );
+    assert_eq!(
+        panel_mouse_inputs(&release),
+        [(
+            crate::protocol::ClientMouseKind::Up(left),
+            ClientMousePosition::Cell { column: 0, row: 3 }
+        )]
+    );
+    assert!(state.selection.is_none());
+    assert!(state.pane_mouse_gesture.is_none());
+}
+
+#[test]
+fn reporting_panel_double_click_reaches_the_program_instead_of_word_selection() {
+    let mut state = state_with_reporting_panel(false);
+    let hit = panel_hit(&state);
+    let (x, y) = (hit.inner_rect.x + 3, hit.inner_rect.y + 1);
+
+    let mut inputs = Vec::new();
+    for _ in 0..2 {
+        inputs.extend(panel_mouse_inputs(&mouse(
+            &mut state,
+            MouseEventKind::Down(MouseButton::Left),
+            x,
+            y,
+        )));
+        inputs.extend(panel_mouse_inputs(&mouse(
+            &mut state,
+            MouseEventKind::Up(MouseButton::Left),
+            x,
+            y,
+        )));
+    }
+
+    assert_eq!(inputs.len(), 4);
+    assert!(inputs
+        .iter()
+        .all(|(_, position)| *position == ClientMousePosition::Cell { column: 3, row: 1 }));
+    assert!(state.selection.is_none());
+    assert!(state.last_pane_click.is_none());
+}
+
+#[test]
+fn reporting_panel_maps_host_pixels_into_its_content_and_pins_a_release_outside_it() {
+    let mut state = state_with_reporting_panel(true);
+    let hit = panel_hit(&state);
+    let geometry =
+        crate::input::mouse::HostGeometry::new(106, 20, 1060, 400).expect("host geometry");
+    let x = u32::from(hit.inner_rect.x + 2) * 10 + 6;
+    let y = u32::from(hit.inner_rect.y + 2) * 20 + 11;
+
+    let press = state.handle_pixel_mouse(format!("\x1b[<0;{x};{y}M").as_bytes(), geometry);
+
+    assert_eq!(
+        panel_mouse_inputs(&press),
+        [(
+            crate::protocol::ClientMouseKind::Down(crate::protocol::ClientMouseButton::Left),
+            ClientMousePosition::Pixels {
+                x: 26,
+                y: 51,
+                column: 2,
+                row: 2
+            }
+        )]
+    );
+
+    let outside = format!("\x1b[<0;41;{y}m");
+    let release = state.handle_pixel_mouse(outside.as_bytes(), geometry);
+
+    assert_eq!(
+        panel_mouse_inputs(&release),
+        [(
+            crate::protocol::ClientMouseKind::Up(crate::protocol::ClientMouseButton::Left),
+            ClientMousePosition::Pixels {
+                x: 1,
+                y: 51,
+                column: 0,
+                row: 2
+            }
+        )]
+    );
+    assert!(state.pane_mouse_gesture.is_none());
+}

@@ -686,11 +686,10 @@ fn resize_right_panel_terminal(
     content: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
-    if runtime.current_size() != (content.height, content.width)
-        && !app
-            .state
-            .direct_attach_resize_locks
-            .contains(&instance.terminal_id)
+    if !app
+        .state
+        .direct_attach_resize_locks
+        .contains(&instance.terminal_id)
     {
         runtime.resize(
             content.height,

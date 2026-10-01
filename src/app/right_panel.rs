@@ -184,6 +184,17 @@ impl App {
         self.terminal_runtimes.get(&instance.terminal_id)
     }
 
+    pub(crate) fn focused_right_panel_runtime(
+        &self,
+        owner: PaneId,
+    ) -> Option<(PaneId, &TerminalRuntime)> {
+        let state = &self.state.right_panel;
+        state.pane(owner).filter(|pane| pane.focused)?;
+        let instance = state.displayed(owner)?;
+        let runtime = self.terminal_runtimes.get(&instance.terminal_id)?;
+        Some((instance.pane_id, runtime))
+    }
+
     pub(crate) fn right_panel_pane_runtime(
         &self,
         public_id: &str,

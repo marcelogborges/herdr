@@ -6037,6 +6037,142 @@ fn client_shell_mouse_capture_combines_local_preference_with_endpoint_demand() {
     ));
 }
 
+fn install_test_right_panel(
+    server: &mut HeadlessServer,
+    terminal_bytes: &[u8],
+    cols: u16,
+    rows: u16,
+) -> crate::right_panel::RightPanelInstance {
+    let owner = server.app.state.workspaces[0].tabs[0].layout.focused();
+    let instance = crate::right_panel::RightPanelInstance {
+        owner,
+        mode: crate::right_panel::RightPanelMode::Files,
+        dir: std::path::PathBuf::from("/tmp"),
+        pane_id: crate::layout::PaneId::alloc(),
+        terminal_id: crate::terminal::TerminalId::alloc(),
+        spawned_at: std::time::Instant::now(),
+        exited: false,
+    };
+    let (runtime, _input_rx) =
+        crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+            cols,
+            rows,
+            0,
+            terminal_bytes,
+            4,
+        );
+    server
+        .app
+        .terminal_runtimes
+        .insert(instance.terminal_id.clone(), runtime);
+    server
+        .app
+        .state
+        .right_panel
+        .instances
+        .push(instance.clone());
+    let panel = server.app.state.right_panel.pane_mut(owner);
+    panel.visible = true;
+    panel.focused = true;
+    panel.mode = crate::right_panel::RightPanelMode::Files;
+    instance
+}
+
+#[tokio::test]
+async fn client_shell_host_mouse_mode_follows_the_focused_right_panel() {
+    let mut server = test_headless_server();
+    let _input_rx = install_focused_test_runtime(&mut server, b"");
+    install_test_right_panel(&mut server, b"\x1b[?1003h\x1b[?1006h\x1b[?1016h", 40, 20);
+    let (writer, control_rx, _render_rx) = test_client_writer();
+    let mut client = ClientConnection::new_with_mode(
+        ClientConnectionMode::ClientShell,
+        (80, 24),
+        crate::kitty_graphics::HostCellSize {
+            width_px: 10,
+            height_px: 20,
+        },
+        1,
+        RenderEncoding::SemanticFrame,
+        Some(writer),
+    );
+    client.pixel_mouse = true;
+    server.clients.insert(11, client);
+    server.foreground_client_id = Some(11);
+    assert!(server.claim_unowned_shell_tab_geometry(11, false));
+
+    server.stream_host_mouse_capture_mode();
+    assert!(matches!(
+        read_server_message(control_rx.recv().expect("panel mouse mode")),
+        ServerMessage::MouseCapture {
+            enabled: true,
+            sgr_pixels: true
+        }
+    ));
+
+    let owner = server.app.state.workspaces[0].tabs[0].layout.focused();
+    server.app.state.right_panel.pane_mut(owner).focused = false;
+    server.stream_host_mouse_capture_mode();
+    assert!(matches!(
+        read_server_message(control_rx.recv().expect("owner pane mouse mode")),
+        ServerMessage::MouseCapture {
+            enabled: false,
+            sgr_pixels: false
+        }
+    ));
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn right_panel_resize_reports_cell_pixels_when_the_grid_already_fits() {
+    let mut server = test_headless_server();
+    let _input_rx = install_focused_test_runtime(&mut server, b"");
+    let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+    let owner = server.app.state.workspaces[0].tabs[0].layout.focused();
+    server.app.state.right_panel.pane_mut(owner).visible = true;
+    let panel = server
+        .app
+        .state
+        .right_panel
+        .panel_rect(Some(owner), area)
+        .expect("panel rect");
+    let content = crate::right_panel::content_rect(panel);
+    let instance = install_test_right_panel(&mut server, b"", content.width, content.height);
+    let runtime = server
+        .app
+        .terminal_runtimes
+        .get(&instance.terminal_id)
+        .expect("panel runtime");
+    assert_eq!(runtime.current_size(), (content.height, content.width));
+    assert_eq!(runtime.pixel_size(), None);
+
+    crate::server::client_shell::resize_right_panel_runtime(
+        &server.app,
+        crate::ui::TabSurfaceTarget {
+            workspace_index: 0,
+            tab_index: 0,
+        },
+        area,
+        crate::kitty_graphics::HostCellSize {
+            width_px: 10,
+            height_px: 20,
+        },
+    );
+
+    let runtime = server
+        .app
+        .terminal_runtimes
+        .get(&instance.terminal_id)
+        .expect("panel runtime");
+    assert_eq!(
+        runtime.pixel_size(),
+        Some((
+            u32::from(content.width) * 10,
+            u32::from(content.height) * 20
+        ))
+    );
+    shutdown_test_runtimes(&mut server);
+}
+
 #[test]
 fn client_shell_focus_promotes_and_reaches_reporting_pane() {
     with_terminal_session_test_server(|server, terminal_id, _other_terminal_id, _pane_id| {
