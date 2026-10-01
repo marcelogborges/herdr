@@ -56,6 +56,28 @@ impl HostGeometry {
 }
 
 impl HostPixels {
+    pub(crate) fn clamped_to(self, inner: ratatui::layout::Rect) -> Option<Self> {
+        let width_px = grid_extent(self.geometry.cols, self.geometry.width_px)?;
+        let height_px = grid_extent(self.geometry.rows, self.geometry.height_px)?;
+        let x_start = boundary(inner.x, self.geometry.cols, width_px)?;
+        let x_end = boundary(
+            inner.x.checked_add(inner.width)?,
+            self.geometry.cols,
+            width_px,
+        )?;
+        let y_start = boundary(inner.y, self.geometry.rows, height_px)?;
+        let y_end = boundary(
+            inner.y.checked_add(inner.height)?,
+            self.geometry.rows,
+            height_px,
+        )?;
+        (x_end > x_start && y_end > y_start).then(|| Self {
+            x: self.x.clamp(x_start + 1, x_end),
+            y: self.y.clamp(y_start + 1, y_end),
+            geometry: self.geometry,
+        })
+    }
+
     pub(crate) fn pane_position(
         self,
         inner: ratatui::layout::Rect,
@@ -245,6 +267,46 @@ mod tests {
         }
         assert_eq!(geometry.cell(1_277, 1), None);
         assert_eq!(geometry.cell(1, 627), None);
+    }
+
+    #[test]
+    fn clamping_keeps_inside_pixels_and_pins_outside_pixels_to_the_pane_edge() {
+        let geometry = HostGeometry::new(80, 24, 800, 480).unwrap();
+        let pane = ratatui::layout::Rect::new(40, 2, 30, 10);
+        let inside = HostPixels {
+            x: 455,
+            y: 75,
+            geometry,
+        };
+        assert_eq!(inside.clamped_to(pane), Some(inside));
+        let left_above = HostPixels {
+            x: 120,
+            y: 5,
+            geometry,
+        }
+        .clamped_to(pane)
+        .unwrap();
+        assert_eq!((left_above.x, left_above.y), (401, 41));
+        assert_eq!(
+            left_above.pane_position(pane, 300, 200),
+            Some(Position::Pixels { x: 1, y: 1 })
+        );
+        let right_below = HostPixels {
+            x: 790,
+            y: 470,
+            geometry,
+        }
+        .clamped_to(pane)
+        .unwrap();
+        assert_eq!((right_below.x, right_below.y), (700, 240));
+        assert_eq!(
+            right_below.pane_position(pane, 300, 200),
+            Some(Position::Pixels { x: 300, y: 200 })
+        );
+        assert_eq!(
+            inside.clamped_to(ratatui::layout::Rect::new(40, 2, 0, 10)),
+            None
+        );
     }
 
     #[test]

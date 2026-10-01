@@ -2465,14 +2465,23 @@ impl ClientShellState {
             self.host_mouse_pixels
                 .and_then(|pixels| {
                     pixels
+                        .clamped_to(hit.inner_rect)?
                         .pane_position(hit.inner_rect, hit.pixel_width, hit.pixel_height)
                         .and_then(|position| match position {
                             crate::input::mouse::Position::Pixels { x, y } => {
                                 Some(ClientMousePosition::Pixels {
                                     x,
                                     y,
-                                    column: mouse.column.saturating_sub(hit.inner_rect.x),
-                                    row: mouse.row.saturating_sub(hit.inner_rect.y),
+                                    column: clamp_to_span(
+                                        mouse.column,
+                                        hit.inner_rect.x,
+                                        hit.inner_rect.width,
+                                    ),
+                                    row: clamp_to_span(
+                                        mouse.row,
+                                        hit.inner_rect.y,
+                                        hit.inner_rect.height,
+                                    ),
                                 })
                             }
                             crate::input::mouse::Position::Cell { .. } => None,
@@ -2520,4 +2529,8 @@ impl ClientShellState {
             outcome,
         );
     }
+}
+
+fn clamp_to_span(value: u16, start: u16, len: u16) -> u16 {
+    value.saturating_sub(start).min(len.saturating_sub(1))
 }

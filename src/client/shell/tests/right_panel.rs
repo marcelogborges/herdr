@@ -493,7 +493,7 @@ fn reporting_panel_double_click_reaches_the_program_instead_of_word_selection() 
 }
 
 #[test]
-fn reporting_panel_maps_host_pixels_into_its_content_area() {
+fn reporting_panel_maps_host_pixels_into_its_content_and_pins_a_release_outside_it() {
     let mut state = state_with_reporting_panel(true);
     let hit = panel_hit(&state);
     let geometry =
@@ -515,4 +515,21 @@ fn reporting_panel_maps_host_pixels_into_its_content_area() {
             }
         )]
     );
+
+    let outside = format!("\x1b[<0;41;{y}m");
+    let release = state.handle_pixel_mouse(outside.as_bytes(), geometry);
+
+    assert_eq!(
+        panel_mouse_inputs(&release),
+        [(
+            crate::protocol::ClientMouseKind::Up(crate::protocol::ClientMouseButton::Left),
+            ClientMousePosition::Pixels {
+                x: 1,
+                y: 51,
+                column: 0,
+                row: 2
+            }
+        )]
+    );
+    assert!(state.pane_mouse_gesture.is_none());
 }
