@@ -89,6 +89,8 @@ pub enum AppEvent {
         agent: Agent,
         observed_at: Instant,
     },
+    /// The current Codex input screen is visible during managed startup.
+    CodexPromptObserved { pane_id: PaneId, ready: bool },
     /// Fallback detector state changed in a pane.
     StateChanged {
         pane_id: PaneId,
@@ -117,6 +119,19 @@ pub enum AppEvent {
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         session_start_source: Option<String>,
+    },
+    /// A reporter supplied the command that resumes its own session.
+    AgentResumeReported {
+        pane_id: PaneId,
+        source: String,
+        agent_label: String,
+        seq: Option<u64>,
+        argv: Vec<String>,
+    },
+    /// A pane held by a self-reported agent is back at its idle shell.
+    ReportedAgentShellReturned {
+        pane_id: PaneId,
+        observed_at: std::time::Instant,
     },
     /// Display-only agent metadata was reported for a pane.
     HookMetadataReported {
@@ -174,6 +189,12 @@ pub enum AppEvent {
     GitStatusRefreshed {
         results: Vec<WorkspaceGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, GitStatusCacheEntry)>,
+    },
+    /// Background validation of a saved membership after session restore.
+    RestoredWorktreeSpaceChecked {
+        workspace_id: String,
+        expected: crate::workspace::WorktreeSpaceMembership,
+        valid: bool,
     },
     /// A configured tab bar status command finished.
     TabBarCommandFinished {
