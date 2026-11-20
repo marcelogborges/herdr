@@ -70,7 +70,11 @@ pub(super) fn render_agent_panel(
     if snapshot.agent_view_label.is_none()
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Sessions
     {
-        let rows = claude_session_rows(snapshot, std::time::SystemTime::now());
+        let rows = claude_session_rows(
+            snapshot,
+            &config.hidden_session_paths,
+            std::time::SystemTime::now(),
+        );
         render_agent_list(
             buffer,
             area,
@@ -405,6 +409,7 @@ pub(super) struct ClaudeSessionRow {
 
 pub(super) fn claude_session_rows(
     snapshot: &ClientShellSnapshot,
+    hidden_paths: &[String],
     now: std::time::SystemTime,
 ) -> Vec<ClaudeSessionRow> {
     let now_ms = now
@@ -414,6 +419,11 @@ pub(super) fn claude_session_rows(
     snapshot
         .claude_sessions
         .iter()
+        .filter(|session| {
+            !hidden_paths
+                .iter()
+                .any(|fragment| !fragment.is_empty() && session.cwd.contains(fragment.as_str()))
+        })
         .map(|session| {
             let agent = session.pane_id.as_deref().and_then(|pane_id| {
                 snapshot

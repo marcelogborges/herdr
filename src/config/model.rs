@@ -1174,6 +1174,9 @@ pub struct UiConfig {
     pub window_title: String,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
+    /// Claude sessions whose working directory contains any of these fragments stay out of the
+    /// sessions list (e.g. sessions opened by automation). Empty by default.
+    pub hidden_session_paths: Vec<String>,
     /// Right panel width in cells or a percentage like "45%". Default: "45%".
     pub right_panel_width: crate::popup_size::PopupSize,
     /// Retired setting that Herdr wrote before the workspace filter was removed.
@@ -1410,6 +1413,7 @@ impl Default for UiConfig {
             tab_bar_right_separator: " ".into(),
             window_title: super::window_title::default_window_title(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
+            hidden_session_paths: Vec::new(),
             right_panel_width: crate::right_panel::default_width(),
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
