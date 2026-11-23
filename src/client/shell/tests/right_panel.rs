@@ -31,14 +31,8 @@ fn panel_pane() -> PaneSurfacePane {
 }
 
 fn state_with_panel() -> ClientShellState {
-    state_with_panel_tabs(Vec::new())
-}
-
-fn state_with_panel_tabs(right_panel_tabs: Vec<String>) -> ClientShellState {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    let mut snapshot = snapshot();
-    snapshot.right_panel_tabs = right_panel_tabs;
-    state.set_snapshot(Box::new(snapshot));
+    state.set_snapshot(Box::new(snapshot()));
     let mut surface = surface();
     surface.panes.push(panel_pane());
     state.set_pane_surface(surface);
@@ -76,42 +70,153 @@ fn endpoint_methods(input: &ClientShellInput) -> Vec<crate::api::schema::Method>
         .collect()
 }
 
-#[test]
-fn header_tab_click_switches_the_panel_mode() {
-    let mut state = state_with_panel_tabs(vec!["rc".into()]);
-    let hit = panel_hit(&state);
-    let modes = crate::right_panel::header_modes(&["rc".into()]);
-    let (_, files) = crate::right_panel::header_tabs(hit.rect, &modes)
-        .into_iter()
-        .find(|(mode, _)| *mode == crate::right_panel::RightPanelMode::Files)
-        .expect("files tab");
+fn ops_views() -> Vec<crate::right_panel::RightPanelView> {
+    let tab =
+        |label: &str, group: Option<&str>, tag: Option<&str>| crate::config::RightPanelTabConfig {
+            label: label.into(),
+            command: "true".into(),
+            icon: None,
+            group: group.map(str::to_owned),
+            tag: tag.map(str::to_owned),
+        };
+    crate::right_panel::build_views(
+        None,
+        &[
+            tab("vigias", None, None),
+            tab("rails c", Some("ops"), Some("prod")),
+            tab("awsx", Some("ops"), None),
+            tab("metabase", Some("ops"), None),
+        ],
+    )
+}
 
-    let input = click(&mut state, files.x + 1, files.y);
+fn custom(label: &str) -> crate::right_panel::RightPanelMode {
+    crate::right_panel::RightPanelMode::Custom(label.into())
+}
+
+fn state_with_projection(
+    mode: crate::right_panel::RightPanelMode,
+    activity_bar: bool,
+    exited: bool,
+) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = snapshot();
+    snapshot.right_panel = Some(crate::protocol::ClientShellRightPanel {
+        views: ops_views(),
+        activity_bar,
+        visible: true,
+        mode,
+        exited,
+    });
+    state.set_snapshot(Box::new(snapshot));
+    let mut surface = surface();
+    surface.panes.push(panel_pane());
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("pane frame");
+    state
+}
+
+fn header(state: &ClientShellState) -> crate::right_panel::HeaderLayout {
+    let projection = state.right_panel_projection();
+    let view = projection
+        .views
+        .iter()
+        .find(|view| view.contains(&projection.mode))
+        .expect("shown view");
+    crate::right_panel::header_layout(panel_hit(state).rect, view, &projection.mode)
+}
+
+#[test]
+fn group_header_tab_click_shows_that_tab() {
+    let mut state = state_with_projection(custom("rails c"), false, false);
+    let layout = header(&state);
+    let (_, awsx) = layout
+        .tabs
+        .iter()
+        .find(|(mode, _)| *mode == custom("awsx"))
+        .cloned()
+        .expect("awsx tab");
+
+    let input = click(&mut state, awsx.x + 1, awsx.y);
 
     assert!(matches!(
         &endpoint_methods(&input)[..],
-        [crate::api::schema::Method::RightPanelShow(params)]
-            if params.mode == crate::right_panel::RightPanelMode::Files
+        [crate::api::schema::Method::RightPanelShow(params)] if params.mode == custom("awsx")
     ));
 }
 
 #[test]
-fn header_click_on_a_custom_tab_shows_it_by_label() {
-    let mut state = state_with_panel_tabs(vec!["rc".into()]);
-    let hit = panel_hit(&state);
-    let custom = crate::right_panel::RightPanelMode::Custom("rc".into());
-    let modes = crate::right_panel::header_modes(&["rc".into()]);
-    let (_, rect) = crate::right_panel::header_tabs(hit.rect, &modes)
-        .into_iter()
-        .find(|(mode, _)| *mode == custom)
-        .expect("custom tab");
+fn header_overflow_marker_shows_the_first_hidden_tab() {
+    let mut state = state_with_projection(custom("rails c"), false, false);
+    let (rect, target, hidden) = header(&state).overflow.expect("overflow marker");
+    assert_eq!((target.clone(), hidden), (custom("metabase"), 1));
 
-    let input = click(&mut state, rect.x + 1, rect.y);
+    let input = click(&mut state, rect.x, rect.y);
 
     assert!(matches!(
         &endpoint_methods(&input)[..],
-        [crate::api::schema::Method::RightPanelShow(params)] if params.mode == custom
+        [crate::api::schema::Method::RightPanelShow(params)] if params.mode == target
     ));
+}
+
+#[test]
+fn header_close_button_hides_the_panel() {
+    let mut state = state_with_projection(custom("vigias"), false, false);
+    let close = header(&state).close.expect("close button");
+
+    let input = click(&mut state, close.x + 1, close.y);
+
+    assert!(matches!(
+        &endpoint_methods(&input)[..],
+        [crate::api::schema::Method::RightPanelHide(_)]
+    ));
+}
+
+#[test]
+fn activity_bar_click_activates_that_view() {
+    let mut state = state_with_projection(crate::right_panel::RightPanelMode::Files, true, false);
+    let bar = state.hits.right_panel_bar.expect("activity bar");
+    assert_eq!(bar.x + bar.width, 106);
+    let (rect, view) = state.hits.right_panel_icons[2];
+    assert_eq!(view, 2);
+
+    let input = click(&mut state, rect.x + 1, rect.y);
+    let blank = click(&mut state, rect.x + 1, rect.y + 1);
+
+    assert!(matches!(
+        &endpoint_methods(&input)[..],
+        [crate::api::schema::Method::RightPanelActivateView(params)] if params.view == 2
+    ));
+    assert!(endpoint_methods(&blank).is_empty());
+}
+
+#[test]
+fn activity_bar_is_absent_when_the_endpoint_hides_it() {
+    let state = state_with_projection(crate::right_panel::RightPanelMode::Files, false, false);
+    assert_eq!(state.hits.right_panel_bar, None);
+    assert!(state.hits.right_panel_icons.is_empty());
+}
+
+#[test]
+fn hovering_an_activity_bar_icon_shows_its_label() {
+    let mut state = state_with_projection(crate::right_panel::RightPanelMode::Files, true, false);
+    let (rect, _) = state.hits.right_panel_icons[1];
+
+    let input = mouse(&mut state, MouseEventKind::Moved, rect.x + 1, rect.y);
+
+    assert!(input.repaint);
+    assert_eq!(state.right_panel_bar_hover, Some(1));
+    let frame = state.compose(106, 20).expect("pane frame");
+    let row = frame_row_text(&frame, rect.y);
+    assert!(row.contains(" vigias "), "{row:?}");
+}
+
+fn frame_row_text(frame: &crate::client::frame_output::ComposedFrame, row: u16) -> String {
+    let width = usize::from(frame.frame.width);
+    frame.frame.cells[usize::from(row) * width..(usize::from(row) + 1) * width]
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect()
 }
 
 #[test]
@@ -532,4 +637,90 @@ fn reporting_panel_maps_host_pixels_into_its_content_and_pins_a_release_outside_
         )]
     );
     assert!(state.pane_mouse_gesture.is_none());
+}
+
+fn alt_key(code: KeyCode) -> RawInputEvent {
+    RawInputEvent::Key(TerminalKey::new(code, KeyModifiers::ALT))
+}
+
+#[test]
+fn view_and_tab_keybinds_send_their_panel_methods() {
+    let config: Config = toml::from_str(
+        "[keys]\nright_panel_view = ['alt+1', 'alt+2']\nright_panel_next_tab = 'alt+]'\nright_panel_previous_tab = 'alt+['",
+    )
+    .unwrap();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut surface = surface();
+    surface.panes.push(panel_pane());
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("pane frame");
+
+    let second = state.handle_raw_events(vec![alt_key(KeyCode::Char('2'))]);
+    let next = state.handle_raw_events(vec![alt_key(KeyCode::Char(']'))]);
+    let previous = state.handle_raw_events(vec![alt_key(KeyCode::Char('['))]);
+
+    assert!(matches!(
+        &endpoint_methods(&second)[..],
+        [crate::api::schema::Method::RightPanelActivateView(params)] if params.view == 1
+    ));
+    assert!(matches!(
+        &endpoint_methods(&next)[..],
+        [crate::api::schema::Method::RightPanelCycleTab(params)]
+            if params.direction == crate::right_panel::RightPanelCycleDirection::Next
+    ));
+    assert!(matches!(
+        &endpoint_methods(&previous)[..],
+        [crate::api::schema::Method::RightPanelCycleTab(params)]
+            if params.direction == crate::right_panel::RightPanelCycleDirection::Previous
+    ));
+}
+
+fn focus_panel(state: &mut ClientShellState, exited: bool) {
+    let mut focused = snapshot();
+    focused.focused_pane_id = Some(PANEL_ID.into());
+    focused.right_panel = Some(crate::protocol::ClientShellRightPanel {
+        views: ops_views(),
+        visible: true,
+        exited,
+        ..Default::default()
+    });
+    state.set_snapshot(Box::new(focused));
+}
+
+fn key(code: KeyCode) -> RawInputEvent {
+    RawInputEvent::Key(TerminalKey::new(code, KeyModifiers::NONE))
+}
+
+#[test]
+fn enter_reopens_and_esc_closes_an_exited_focused_panel() {
+    let mut state = state_with_panel();
+    focus_panel(&mut state, true);
+
+    let enter = state.handle_raw_events(vec![key(KeyCode::Enter)]);
+    let esc = state.handle_raw_events(vec![key(KeyCode::Esc)]);
+
+    assert!(matches!(
+        &endpoint_methods(&enter)[..],
+        [crate::api::schema::Method::RightPanelRestart(_)]
+    ));
+    assert!(matches!(
+        &endpoint_methods(&esc)[..],
+        [crate::api::schema::Method::RightPanelHide(_)]
+    ));
+    assert!(enter.requests.is_empty() && esc.requests.is_empty());
+}
+
+#[test]
+fn enter_reaches_a_running_focused_panel() {
+    let mut state = state_with_panel();
+    focus_panel(&mut state, false);
+
+    let input = state.handle_raw_events(vec![key(KeyCode::Enter)]);
+
+    assert!(endpoint_methods(&input).is_empty());
+    assert!(matches!(
+        &input.requests[..],
+        [ClientMessage::ClientShellPaneInput { pane_id, .. }] if pane_id == PANEL_ID
+    ));
 }

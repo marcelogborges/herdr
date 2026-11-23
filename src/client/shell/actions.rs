@@ -45,6 +45,36 @@ impl ClientShellState {
                     outcome,
                 );
             }
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::RightPanelView(
+                index,
+            )) => {
+                self.mode = ClientShellMode::Terminal;
+                self.push_endpoint_method(
+                    crate::api::schema::Method::RightPanelActivateView(
+                        crate::api::schema::RightPanelActivateViewParams {
+                            view: u32::try_from(index).unwrap_or(u32::MAX),
+                        },
+                    ),
+                    outcome,
+                );
+            }
+            crate::input::KeybindMatch::Action(
+                action @ (crate::input::KeybindAction::RightPanelNextTab
+                | crate::input::KeybindAction::RightPanelPreviousTab),
+            ) => {
+                let direction = if action == crate::input::KeybindAction::RightPanelNextTab {
+                    crate::right_panel::RightPanelCycleDirection::Next
+                } else {
+                    crate::right_panel::RightPanelCycleDirection::Previous
+                };
+                self.mode = ClientShellMode::Terminal;
+                self.push_endpoint_method(
+                    crate::api::schema::Method::RightPanelCycleTab(
+                        crate::api::schema::RightPanelCycleParams { direction },
+                    ),
+                    outcome,
+                );
+            }
             crate::input::KeybindMatch::Action(action) => {
                 if self.workspace_preview_action_blocked()
                     && matches!(

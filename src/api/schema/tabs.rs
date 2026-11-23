@@ -45,6 +45,12 @@ pub struct RightPanelCycleParams {
     pub direction: crate::right_panel::RightPanelCycleDirection,
 }
 
+/// Zero-based position of a view in the activity bar; files is view 0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RightPanelActivateViewParams {
+    pub view: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RightPanelSetWidthParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -851,13 +851,31 @@
           "key": "keys.right_panel_next_mode",
           "type": "keybinding",
           "default": "\"alt+q\"",
-          "description": "Switch the focused pane's right panel to the next mode (files, then custom tabs), opening it if hidden."
+          "description": "Switch the focused pane's right panel to the next view (files, then custom tabs and groups), opening it if hidden."
         },
         {
           "key": "keys.right_panel_previous_mode",
           "type": "keybinding",
           "default": "\"alt+e\"",
-          "description": "Switch the focused pane's right panel to the previous mode (files, then custom tabs), opening it if hidden."
+          "description": "Switch the focused pane's right panel to the previous view (files, then custom tabs and groups), opening it if hidden."
+        },
+        {
+          "key": "keys.right_panel_view",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Open right panel view 1-9 in activity bar order (files is 1), or close the panel when it already shows that view. Unset by default."
+        },
+        {
+          "key": "keys.right_panel_next_tab",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Show the next tab inside the right panel's group view, opening the panel if hidden. Unset by default."
+        },
+        {
+          "key": "keys.right_panel_previous_tab",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Show the previous tab inside the right panel's group view, opening the panel if hidden. Unset by default."
         },
         {
           "key": "keys.indexed.tabs",
@@ -1498,10 +1516,27 @@
           "description": "Command `herdr right-panel open` and `right_panel.open` run for a file, through /bin/sh -c in the file's directory. {path} and {dir} are replaced with shell-quoted paths and {line} with the line number (1 when none is given)."
         },
         {
+          "key": "right_panel.activity_bar",
+          "type": "enum",
+          "default": "\"off\"",
+          "description": "When the activity bar with one icon per panel view shows on the right edge: always, only while the focused pane's panel is open, or never.",
+          "values": [
+            "always",
+            "when_open",
+            "off"
+          ]
+        },
+        {
+          "key": "right_panel.files_icon",
+          "type": "string",
+          "default": "unset",
+          "description": "Activity bar icon for the built-in files view. Defaults to its first letter."
+        },
+        {
           "key": "right_panel.tabs",
           "type": "array of tables",
           "default": "[]",
-          "description": "Extra panel tabs shown after files. Each command runs through /bin/sh -c with HERDR_PANEL_OWNER_PANE_ID and HERDR_SESSION_REPOS set; the label is also the mode accepted by right_panel.show. Empty, duplicate, or built-in labels are skipped with a diagnostic."
+          "description": "Extra panel tabs shown after files. Each command runs through /bin/sh -c with HERDR_PANEL_OWNER_PANE_ID and HERDR_SESSION_REPOS set; the label is also the mode accepted by right_panel.show. Optional icon, group (tabs sharing a group form one view with a tab row), and tag (\"prod\" adds a PROD badge and a red focus border). Empty, duplicate, or built-in labels are skipped with a diagnostic."
         }
       ]
     },

@@ -147,6 +147,65 @@ impl ClientShellState {
         FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
     }
 
+    /// Right panel views and focused-pane panel state from the endpoint snapshot.
+    pub(super) fn right_panel_projection(&self) -> crate::protocol::ClientShellRightPanel {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return crate::protocol::ClientShellRightPanel::default();
+        };
+        snapshot.right_panel.clone().unwrap_or_else(|| {
+            let tabs = snapshot
+                .right_panel_tabs
+                .iter()
+                .map(|label| crate::config::RightPanelTabConfig {
+                    label: label.clone(),
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>();
+            crate::protocol::ClientShellRightPanel {
+                views: crate::right_panel::build_views(None, &tabs),
+                ..Default::default()
+            }
+        })
+    }
+
+    fn render_right_panel_bar_tooltip(&self, frame: &mut FrameData) {
+        let (Some(hover), Some(bar)) = (self.right_panel_bar_hover, self.hits.right_panel_bar)
+        else {
+            return;
+        };
+        let (Some(view), Some((rect, _))) = (
+            self.snapshot
+                .as_deref()
+                .and_then(|snapshot| snapshot.right_panel.as_ref())
+                .and_then(|panel| panel.views.get(hover)),
+            self.hits
+                .right_panel_icons
+                .iter()
+                .find(|(_, view)| *view == hover),
+        ) else {
+            return;
+        };
+        let label = format!(" {} ", view.label);
+        let width = u16::try_from(unicode_width::UnicodeWidthStr::width(label.as_str()))
+            .unwrap_or(u16::MAX);
+        let Some(x) = bar.x.checked_sub(width) else {
+            return;
+        };
+        let cursor = frame.cursor.clone();
+        let Some(mut buffer) = frame.to_ratatui_buffer() else {
+            return;
+        };
+        buffer.set_string(
+            x,
+            rect.y,
+            label,
+            ratatui::style::Style::default()
+                .fg(self.config.palette.text)
+                .bg(self.config.palette.surface1),
+        );
+        frame.replace_from_ratatui_buffer_preserving_effects(&buffer, cursor);
+    }
+
     pub(crate) fn compose(
         &mut self,
         cols: u16,
@@ -274,6 +333,30 @@ impl ClientShellState {
                 pixel_height: pane.pixel_height,
             })
             .collect();
+        let (bar_shown, view_count) = snapshot
+            .right_panel
+            .as_ref()
+            .map_or((false, 0), |panel| (panel.activity_bar, panel.views.len()));
+        self.hits.right_panel_bar = bar_shown
+            .then(|| crate::right_panel::activity_bar_rect(layout.pane_surface))
+            .flatten()
+            .filter(|_| self.config.mouse_capture);
+        self.hits.right_panel_icons = self.hits.right_panel_bar.map_or_else(Vec::new, |bar| {
+            crate::right_panel::activity_bar_icons(bar, view_count)
+                .into_iter()
+                .enumerate()
+                .map(|(index, rect)| (rect, index))
+                .collect()
+        });
+        if self.right_panel_bar_hover.is_some_and(|hover| {
+            !self
+                .hits
+                .right_panel_icons
+                .iter()
+                .any(|(_, view)| *view == hover)
+        }) {
+            self.right_panel_bar_hover = None;
+        }
         let topology_signature = pane_surface_topology_signature(surface);
         self.hits.pane_splits = surface
             .splits
@@ -413,6 +496,7 @@ impl ClientShellState {
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
         self.render_link_hover(&mut frame, &mut occlusion);
+        self.render_right_panel_bar_tooltip(&mut frame);
         if self.mode == ClientShellMode::Copy {
             frame.cursor = None;
             if let Some(copy_mode) = self.copy_mode.as_ref() {

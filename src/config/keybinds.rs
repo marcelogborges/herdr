@@ -406,6 +406,9 @@ pub struct Keybinds {
     pub toggle_right_panel: ActionKeybinds,
     pub right_panel_next_mode: ActionKeybinds,
     pub right_panel_previous_mode: ActionKeybinds,
+    pub right_panel_view: Vec<IndexedKeybind>,
+    pub right_panel_next_tab: ActionKeybinds,
+    pub right_panel_previous_tab: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
 }
 
@@ -592,6 +595,9 @@ impl Config {
             toggle_right_panel: empty_action!(),
             right_panel_next_mode: empty_action!(),
             right_panel_previous_mode: empty_action!(),
+            right_panel_view: Vec::new(),
+            right_panel_next_tab: empty_action!(),
+            right_panel_previous_tab: empty_action!(),
             custom_commands: Vec::new(),
         };
 
@@ -749,6 +755,13 @@ impl Config {
             apply_action!(
                 keybinds.right_panel_previous_mode,
                 right_panel_previous_mode,
+                source
+            );
+            apply_indexed!(keybinds.right_panel_view, right_panel_view, "", source);
+            apply_action!(keybinds.right_panel_next_tab, right_panel_next_tab, source);
+            apply_action!(
+                keybinds.right_panel_previous_tab,
+                right_panel_previous_tab,
                 source
             );
 

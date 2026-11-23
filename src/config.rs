@@ -53,7 +53,7 @@ pub(crate) use self::{
 
 pub(crate) use self::{
     keybinds::CommandKeybindType,
-    model::{KeysConfig, RightPanelConfig, RightPanelTabConfig},
+    model::{KeysConfig, RightPanelActivityBarConfig, RightPanelConfig, RightPanelTabConfig},
 };
 
 pub const CONFIG_PATH_ENV_VAR: &str = "HERDR_CONFIG_PATH";

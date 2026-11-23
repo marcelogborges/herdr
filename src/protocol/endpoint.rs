@@ -249,6 +249,7 @@ mod tests {
             commands: Vec::new(),
             claude_sessions: Vec::new(),
             right_panel_tabs: Vec::new(),
+            right_panel: None,
         }
     }
 

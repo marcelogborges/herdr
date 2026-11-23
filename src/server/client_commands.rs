@@ -274,6 +274,22 @@ mod tests {
             actual.remove("right_panel.toggle").as_deref(),
             Some("95361ffcc1b6c76ad4322d6aa9796a05f41a93f228ba46099c8216112467fe2f")
         );
+        assert_eq!(
+            actual.remove("right_panel.activate_view").as_deref(),
+            Some("b586705b05df14b6cac596ad2dc7a0f588e2faa1774f8bc234a677784cf50ddd")
+        );
+        assert_eq!(
+            actual.remove("right_panel.cycle_tab").as_deref(),
+            Some("5e2f7d17e89faf956660eec75e3bab6515127bf9078d16559b2311d764b3dbd9")
+        );
+        assert_eq!(
+            actual.remove("right_panel.hide").as_deref(),
+            Some("501a07893972add486ff081a5518eb119c105e040fcb351aa4cd96b4db8bc3e8")
+        );
+        assert_eq!(
+            actual.remove("right_panel.restart").as_deref(),
+            Some("d1f20964027ecaffb2260e7c3735bfb075b68014fc4c9a7a2b45ded35e75e020")
+        );
 
         assert_eq!(
             actual, expected,

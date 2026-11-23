@@ -302,8 +302,26 @@ pub(super) fn snapshot_with_completions(
         commands: app.client_shell_command_manifest(),
         claude_sessions,
         right_panel_tabs: app.state.right_panel.custom_labels(),
+        right_panel: Some(right_panel_projection(app, focused_panel_owner)),
     };
     (shell, completions)
+}
+
+fn right_panel_projection(
+    app: &app::App,
+    owner: Option<crate::layout::PaneId>,
+) -> protocol::ClientShellRightPanel {
+    let state = &app.state.right_panel;
+    let pane = owner.and_then(|owner| state.pane(owner));
+    protocol::ClientShellRightPanel {
+        views: state.views.clone(),
+        activity_bar: state.bar_visible_for(owner),
+        visible: pane.is_some_and(|pane| pane.visible),
+        mode: pane.map(|pane| pane.mode.clone()).unwrap_or_default(),
+        exited: owner
+            .and_then(|owner| state.displayed(owner))
+            .is_some_and(|instance| instance.exited),
+    }
 }
 
 pub(super) struct RenderedPaneSurface {
@@ -398,6 +416,9 @@ pub(super) fn render_pane_surface(
     let right_panel_pane = right_panel.and_then(|(owner, panel)| {
         render_right_panel(app, &mut buffer, &mut cursor, owner, panel, cell_size)
     });
+    if let Some(bar) = app.state.right_panel.bar_rect(right_panel_owner, area) {
+        render_activity_bar(app, &mut buffer, right_panel_owner, bar);
+    }
     let right_panel_focused = right_panel_pane.as_ref().is_some_and(|pane| pane.focused);
     let mut panes: Vec<protocol::PaneSurfacePane> = target
         .map(|target| {
@@ -561,34 +582,68 @@ fn render_right_panel(
     panel: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> Option<protocol::PaneSurfacePane> {
-    use ratatui::style::{Modifier, Style};
+    use ratatui::style::Style;
 
     let state = &app.state.right_panel;
     let pane_state = state.pane(owner)?;
     let instance = state.displayed(owner)?;
     let runtime = app.terminal_runtimes.get(&instance.terminal_id)?;
     let panel = panel.intersection(buffer.area);
-    let content = crate::right_panel::content_rect(panel);
+    let mode = &pane_state.mode;
+    let fallback_view;
+    let view = match state.view_for(mode) {
+        Some(view) => view,
+        None => {
+            fallback_view = crate::right_panel::RightPanelView {
+                label: mode.label().to_owned(),
+                icon: String::new(),
+                group: false,
+                tabs: Vec::new(),
+            };
+            &fallback_view
+        }
+    };
+    let content = crate::right_panel::content_rect(panel, view.header_rows());
     if content.width == 0 || content.height == 0 {
         return None;
     }
+    let starting = !instance.exited
+        && runtime.content_seq() == 0
+        && instance.spawned_at.elapsed() < crate::right_panel::FAILED_START_WINDOW;
     resize_right_panel_terminal(app, instance, runtime, content, cell_size);
-    let (panel_buffer, panel_cursor) = crate::server::render_stream::render_terminal_virtual(
-        runtime,
-        Rect::new(0, 0, content.width, content.height),
-    );
-    for y in 0..content.height {
-        for x in 0..content.width {
-            buffer[(content.x + x, content.y + y)] = panel_buffer[(x, y)].clone();
+    if instance.exited || starting {
+        clear_rect(buffer, content, Style::default());
+        let label = view
+            .tab(mode)
+            .map_or_else(|| mode.label().to_owned(), |tab| tab.label.clone());
+        render_right_panel_card(app, buffer, content, instance, &label);
+    } else {
+        let (panel_buffer, panel_cursor) = crate::server::render_stream::render_terminal_virtual(
+            runtime,
+            Rect::new(0, 0, content.width, content.height),
+        );
+        for y in 0..content.height {
+            for x in 0..content.width {
+                buffer[(content.x + x, content.y + y)] = panel_buffer[(x, y)].clone();
+            }
+        }
+        if pane_state.focused {
+            *cursor = panel_cursor.map(|mut panel_cursor| {
+                panel_cursor.x = panel_cursor.x.saturating_add(content.x);
+                panel_cursor.y = panel_cursor.y.saturating_add(content.y);
+                panel_cursor
+            });
         }
     }
 
     let palette = &app.state.palette;
     let focused = pane_state.focused;
-    let edge = Style::default().fg(if focused {
-        palette.accent
-    } else {
+    let edge = Style::default().fg(if !focused {
         palette.overlay0
+    } else if state.is_prod(mode) {
+        palette.red
+    } else {
+        palette.accent
     });
     for y in panel.y..panel.y + panel.height {
         let cell = &mut buffer[(panel.x, y)];
@@ -596,62 +651,8 @@ fn render_right_panel(
         cell.set_symbol("│");
         cell.set_style(edge);
     }
-    let header = Style::default().bg(palette.panel_bg).fg(palette.overlay0);
-    for x in panel.x + 1..panel.x + panel.width {
-        let cell = &mut buffer[(x, panel.y)];
-        cell.reset();
-        cell.set_symbol(" ");
-        cell.set_style(header);
-    }
-    let tabs = crate::right_panel::header_tabs(panel, &state.modes());
-    for (mode, rect) in &tabs {
-        let style = if *mode == pane_state.mode {
-            header
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-        } else {
-            header.fg(palette.subtext0)
-        };
-        buffer.set_string(rect.x, rect.y, format!(" {} ", mode.label()), style);
-    }
-    let label_x = tabs
-        .last()
-        .map_or(panel.x + 2, |(_, rect)| rect.x + rect.width + 2);
-    let right = panel.x + panel.width;
-    if label_x < right {
-        let dir = instance
-            .dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        let visible: String = dir.chars().take(usize::from(right - label_x)).collect();
-        buffer.set_string(label_x, panel.y, visible, header.fg(palette.overlay1));
-    }
+    render_right_panel_header(app, buffer, owner, panel, view, instance);
 
-    if instance.exited {
-        let notice = format!(
-            " {} exited · click a tab or prefix+i to close ",
-            state.command(&instance.mode).unwrap_or_default()
-        );
-        let row = content.y + content.height - 1;
-        let style = Style::default().bg(palette.red).fg(palette.panel_bg);
-        for x in content.x..content.x + content.width {
-            let cell = &mut buffer[(x, row)];
-            cell.reset();
-            cell.set_symbol(" ");
-            cell.set_style(style);
-        }
-        let visible: String = notice.chars().take(usize::from(content.width)).collect();
-        buffer.set_string(content.x, row, visible, style);
-    }
-
-    if focused && !instance.exited {
-        *cursor = panel_cursor.map(|mut panel_cursor| {
-            panel_cursor.x = panel_cursor.x.saturating_add(content.x);
-            panel_cursor.y = panel_cursor.y.saturating_add(content.y);
-            panel_cursor
-        });
-    }
     let (pixel_width, pixel_height) = if cell_size.is_known() {
         (
             u32::from(content.width) * cell_size.width_px,
@@ -680,6 +681,271 @@ fn render_right_panel(
         pixel_width,
         pixel_height,
     })
+}
+
+fn clear_rect(buffer: &mut ratatui::buffer::Buffer, rect: Rect, style: ratatui::style::Style) {
+    let rect = rect.intersection(buffer.area);
+    for y in rect.y..rect.y + rect.height {
+        for x in rect.x..rect.x + rect.width {
+            let cell = &mut buffer[(x, y)];
+            cell.reset();
+            cell.set_symbol(" ");
+            cell.set_style(style);
+        }
+    }
+}
+
+/// Writes `text` from `x` without passing `right`; returns the column after it.
+fn put_text(
+    buffer: &mut ratatui::buffer::Buffer,
+    x: u16,
+    y: u16,
+    right: u16,
+    text: &str,
+    style: ratatui::style::Style,
+) -> u16 {
+    if x >= right {
+        return x;
+    }
+    let (end, _) = buffer.set_stringn(x, y, text, usize::from(right - x), style);
+    end
+}
+
+fn render_right_panel_header(
+    app: &app::App,
+    buffer: &mut ratatui::buffer::Buffer,
+    owner: crate::layout::PaneId,
+    panel: Rect,
+    view: &crate::right_panel::RightPanelView,
+    instance: &crate::right_panel::RightPanelInstance,
+) {
+    use ratatui::style::{Modifier, Style};
+
+    let palette = &app.state.palette;
+    let state = &app.state.right_panel;
+    let Some(pane_state) = state.pane(owner) else {
+        return;
+    };
+    let header = Style::default().bg(palette.panel_bg).fg(palette.overlay0);
+    let rows = view.header_rows().min(panel.height);
+    clear_rect(
+        buffer,
+        Rect::new(panel.x + 1, panel.y, panel.width.saturating_sub(1), rows),
+        header,
+    );
+    let layout = crate::right_panel::header_layout(panel, view, &pane_state.mode);
+    let right = layout
+        .close
+        .map_or(panel.x + panel.width, |close| close.x.saturating_sub(1));
+    let mut x = panel.x + 2;
+    if !view.icon.is_empty() {
+        x = put_text(
+            buffer,
+            x,
+            panel.y,
+            right,
+            &view.icon,
+            header.fg(palette.accent),
+        );
+        x = put_text(buffer, x, panel.y, right, " ", header);
+    }
+    x = put_text(
+        buffer,
+        x,
+        panel.y,
+        right,
+        &view.label.to_uppercase(),
+        header.fg(palette.text).add_modifier(Modifier::BOLD),
+    );
+    if pane_state.mode == crate::right_panel::RightPanelMode::Files {
+        let mut parts = instance
+            .dir
+            .components()
+            .rev()
+            .filter_map(|part| match part {
+                std::path::Component::Normal(name) => name.to_str(),
+                _ => None,
+            })
+            .take(2)
+            .collect::<Vec<_>>();
+        parts.reverse();
+        if let Some((last, parents)) = parts.split_last() {
+            x = put_text(buffer, x, panel.y, right, "  ", header);
+            for parent in parents {
+                x = put_text(
+                    buffer,
+                    x,
+                    panel.y,
+                    right,
+                    parent,
+                    header.fg(palette.overlay1),
+                );
+                x = put_text(buffer, x, panel.y, right, " › ", header);
+            }
+            put_text(buffer, x, panel.y, right, last, header.fg(palette.subtext0));
+        }
+    }
+    if let Some(close) = layout.close {
+        buffer.set_string(close.x, close.y, " ✕ ", header.fg(palette.overlay1));
+    }
+
+    let tab_right = panel.x + panel.width;
+    for (mode, rect) in &layout.tabs {
+        let Some(tab) = view.tab(mode) else {
+            continue;
+        };
+        let tab_instance = state
+            .instance_for(owner, mode)
+            .map(|index| &state.instances[index]);
+        let (dot, dot_color) = match tab_instance {
+            Some(instance) if instance.exited => ("✕", palette.red),
+            Some(_) => ("●", palette.green),
+            None => ("○", palette.overlay0),
+        };
+        let mut x = put_text(buffer, rect.x, rect.y, tab_right, dot, header.fg(dot_color));
+        x = put_text(buffer, x, rect.y, tab_right, " ", header);
+        let label_style = if *mode == pane_state.mode {
+            header
+                .fg(if tab.prod {
+                    palette.red
+                } else {
+                    palette.accent
+                })
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            header.fg(palette.overlay1)
+        };
+        x = put_text(buffer, x, rect.y, tab_right, &tab.label, label_style);
+        if tab.prod {
+            x = put_text(buffer, x, rect.y, tab_right, " ", header);
+            put_text(
+                buffer,
+                x,
+                rect.y,
+                tab_right,
+                crate::right_panel::prod_badge(),
+                Style::default()
+                    .bg(palette.red)
+                    .fg(ratatui::style::Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+    }
+    if let Some((rect, _, hidden)) = &layout.overflow {
+        put_text(
+            buffer,
+            rect.x,
+            rect.y,
+            tab_right,
+            &format!("›{hidden}"),
+            header.fg(palette.overlay1),
+        );
+    }
+}
+
+fn render_right_panel_card(
+    app: &app::App,
+    buffer: &mut ratatui::buffer::Buffer,
+    content: Rect,
+    instance: &crate::right_panel::RightPanelInstance,
+    label: &str,
+) {
+    use ratatui::style::{Modifier, Style};
+
+    let palette = &app.state.palette;
+    let lines: Vec<Vec<(String, Style)>> = if instance.exited {
+        let mut lines = vec![vec![
+            ("✕  ".to_owned(), Style::default().fg(palette.red)),
+            (
+                format!("{label} exited"),
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]];
+        if let Some(at) = &instance.exited_at {
+            lines.push(vec![(at.clone(), Style::default().fg(palette.overlay1))]);
+        }
+        lines.push(Vec::new());
+        let key = Style::default().fg(palette.text).bg(palette.surface0);
+        let hint = Style::default().fg(palette.subtext0);
+        lines.push(vec![
+            (" enter ".to_owned(), key),
+            (" reopen   ".to_owned(), hint),
+            (" esc ".to_owned(), key),
+            (" close".to_owned(), hint),
+        ]);
+        lines
+    } else {
+        vec![vec![
+            ("⠋ ".to_owned(), Style::default().fg(palette.accent)),
+            (
+                format!("starting {label}…"),
+                Style::default().fg(palette.subtext0),
+            ),
+        ]]
+    };
+    let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let top = content.y + content.height.saturating_sub(height) / 2;
+    let right = content.x + content.width;
+    for (row, line) in lines.iter().enumerate() {
+        let y = top + u16::try_from(row).unwrap_or(0);
+        if y >= content.y + content.height {
+            break;
+        }
+        let width: usize = line
+            .iter()
+            .map(|(text, _)| unicode_width::UnicodeWidthStr::width(text.as_str()))
+            .sum();
+        let width = u16::try_from(width).unwrap_or(u16::MAX);
+        let mut x = content.x + content.width.saturating_sub(width) / 2;
+        for (text, style) in line {
+            x = put_text(buffer, x, y, right, text, *style);
+        }
+    }
+}
+
+fn render_activity_bar(
+    app: &app::App,
+    buffer: &mut ratatui::buffer::Buffer,
+    owner: Option<crate::layout::PaneId>,
+    bar: Rect,
+) {
+    use ratatui::style::Style;
+
+    let palette = &app.state.palette;
+    let state = &app.state.right_panel;
+    let bar = bar.intersection(buffer.area);
+    clear_rect(buffer, bar, Style::default().bg(palette.panel_bg));
+    let active = owner
+        .and_then(|owner| state.pane(owner))
+        .filter(|pane| pane.visible)
+        .and_then(|pane| crate::right_panel::view_index(&state.views, &pane.mode));
+    let icons = crate::right_panel::activity_bar_icons(bar, state.views.len());
+    for (index, (view, rect)) in state.views.iter().zip(icons).enumerate() {
+        let right = rect.x + rect.width;
+        let base = Style::default().bg(palette.panel_bg);
+        if active == Some(index) {
+            put_text(buffer, rect.x, rect.y, right, "▎", base.fg(palette.accent));
+            put_text(
+                buffer,
+                rect.x + 1,
+                rect.y,
+                right,
+                &view.icon,
+                base.fg(palette.accent),
+            );
+        } else {
+            put_text(
+                buffer,
+                rect.x + 1,
+                rect.y,
+                right,
+                &view.icon,
+                base.fg(palette.overlay0),
+            );
+        }
+    }
 }
 
 fn resize_right_panel_terminal(
@@ -721,7 +987,13 @@ pub(super) fn resize_right_panel_runtime(
     let Some(runtime) = app.terminal_runtimes.get(&instance.terminal_id) else {
         return;
     };
-    let content = crate::right_panel::content_rect(panel);
+    let mode = app
+        .state
+        .right_panel
+        .pane(owner)
+        .map(|pane| pane.mode.clone())
+        .unwrap_or_default();
+    let content = crate::right_panel::content_rect(panel, app.state.right_panel.header_rows(&mode));
     if content.width > 0 && content.height > 0 {
         resize_right_panel_terminal(app, instance, runtime, content, cell_size);
     }
@@ -861,6 +1133,199 @@ fn split_hit_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn panel_app(mode: &str, focused: bool) -> (app::App, crate::right_panel::RightPanelInstance) {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("panel")];
+        app.state.active = Some(0);
+        let tab = |label: &str, group: Option<&str>, tag: Option<&str>| {
+            crate::config::RightPanelTabConfig {
+                label: label.into(),
+                command: "true".into(),
+                icon: None,
+                group: group.map(str::to_owned),
+                tag: tag.map(str::to_owned),
+            }
+        };
+        let config = crate::config::RightPanelConfig {
+            activity_bar: crate::config::RightPanelActivityBarConfig::Always,
+            tabs: vec![
+                tab("vigias", None, None),
+                tab("rails c", Some("ops"), Some("prod")),
+                tab("awsx", Some("ops"), None),
+            ],
+            ..Default::default()
+        };
+        let width = app.state.right_panel.width;
+        app.apply_right_panel_config(width, &config);
+        let owner = app.state.workspaces[0].focused_pane_id().unwrap();
+        let mode = crate::right_panel::RightPanelMode::from_label(mode);
+        let instance = crate::right_panel::RightPanelInstance {
+            owner,
+            mode: mode.clone(),
+            dir: std::path::PathBuf::from("/home/user/projects/vakinha-api"),
+            pane_id: crate::layout::PaneId::alloc(),
+            terminal_id: crate::terminal::TerminalId::alloc(),
+            spawned_at: std::time::Instant::now(),
+            exited: false,
+            exited_at: None,
+        };
+        app.terminal_runtimes.insert(
+            instance.terminal_id.clone(),
+            crate::terminal::TerminalRuntime::test_with_scrollback_bytes(40, 18, 0, b""),
+        );
+        app.state.right_panel.instances.push(instance.clone());
+        app.state.right_panel.set_mode(owner, mode);
+        let pane = app.state.right_panel.pane_mut(owner);
+        pane.visible = true;
+        pane.focused = focused;
+        (app, instance)
+    }
+
+    const PANEL: Rect = Rect::new(40, 0, 40, 20);
+
+    fn render_panel(
+        app: &app::App,
+        owner: crate::layout::PaneId,
+    ) -> (ratatui::buffer::Buffer, protocol::PaneSurfacePane) {
+        let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 83, 20));
+        let mut cursor = None;
+        let pane = render_right_panel(
+            app,
+            &mut buffer,
+            &mut cursor,
+            owner,
+            PANEL,
+            crate::kitty_graphics::HostCellSize::default(),
+        )
+        .expect("rendered panel");
+        (buffer, pane)
+    }
+
+    fn row(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (buffer.area.x..buffer.area.x + buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn group_view_header_has_a_title_and_a_tab_row_with_a_prod_badge() {
+        let (app, instance) = panel_app("rails c", true);
+        let (buffer, pane) = render_panel(&app, instance.owner);
+
+        assert!(row(&buffer, 0).contains("R OPS"), "{:?}", row(&buffer, 0));
+        assert!(row(&buffer, 0).contains(" ✕ "));
+        let tabs = row(&buffer, 1);
+        assert!(tabs.contains("● rails c  PROD"), "{tabs:?}");
+        assert!(tabs.contains("○ awsx"), "{tabs:?}");
+        assert_eq!(pane.inner_rect, Rect::new(41, 2, 39, 18).into());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn focused_prod_tab_draws_a_red_edge_and_other_tabs_the_accent() {
+        let (app, instance) = panel_app("rails c", true);
+        let (buffer, _) = render_panel(&app, instance.owner);
+        assert_eq!(buffer[(40, 5)].fg, app.state.palette.red);
+
+        let (app, instance) = panel_app("vigias", true);
+        let (buffer, _) = render_panel(&app, instance.owner);
+        assert_eq!(buffer[(40, 5)].fg, app.state.palette.accent);
+
+        let (app, instance) = panel_app("rails c", false);
+        let (buffer, _) = render_panel(&app, instance.owner);
+        assert_eq!(buffer[(40, 5)].fg, app.state.palette.overlay0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn files_title_shows_a_breadcrumb_of_the_panel_directory() {
+        let (app, instance) = panel_app("files", false);
+        let (buffer, pane) = render_panel(&app, instance.owner);
+        let title = row(&buffer, 0);
+        assert!(
+            title.contains("F FILES  projects › vakinha-api"),
+            "{title:?}"
+        );
+        assert_eq!(pane.inner_rect, Rect::new(41, 1, 39, 19).into());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn exited_and_starting_commands_show_a_centered_card() {
+        let (mut app, instance) = panel_app("vigias", true);
+        let text = |buffer: &ratatui::buffer::Buffer| {
+            (0..buffer.area.height)
+                .map(|y| row(buffer, y))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let (buffer, _) = render_panel(&app, instance.owner);
+        assert!(
+            text(&buffer).contains("⠋ starting vigias…"),
+            "{}",
+            text(&buffer)
+        );
+
+        app.state.right_panel.instances[0].exited = true;
+        app.state.right_panel.instances[0].exited_at = Some("14:32".into());
+        let (buffer, _) = render_panel(&app, instance.owner);
+        let card = text(&buffer);
+        assert!(card.contains("✕  vigias exited"), "{card}");
+        assert!(card.contains("14:32"));
+        assert!(card.contains(" enter  reopen    esc  close"), "{card}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn activity_bar_marks_the_shown_view() {
+        let (app, instance) = panel_app("awsx", true);
+        let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 83, 20));
+        render_activity_bar(
+            &app,
+            &mut buffer,
+            Some(instance.owner),
+            Rect::new(80, 0, 3, 20),
+        );
+
+        let icons = (1..7)
+            .step_by(2)
+            .map(|y| {
+                (
+                    buffer[(80, y)].symbol().to_owned(),
+                    buffer[(81, y)].symbol().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            icons,
+            vec![
+                (" ".to_owned(), "F".to_owned()),
+                (" ".to_owned(), "V".to_owned()),
+                ("▎".to_owned(), "R".to_owned()),
+            ]
+        );
+        assert_eq!(buffer[(81, 5)].fg, app.state.palette.accent);
+        assert_eq!(buffer[(81, 1)].fg, app.state.palette.overlay0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn snapshot_projects_views_and_the_focused_pane_panel() {
+        let (mut app, _) = panel_app("awsx", true);
+        app.state.right_panel.instances[0].exited = true;
+        let projection = snapshot(&app, "boot", 1, None, None)
+            .right_panel
+            .expect("right panel projection");
+        assert_eq!(projection.views.len(), 3);
+        assert!(projection.activity_bar && projection.visible && projection.exited);
+        assert_eq!(
+            projection.mode,
+            crate::right_panel::RightPanelMode::Custom("awsx".into())
+        );
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn snapshot_metadata_skips_scroll_reads_and_preserves_public_session_data() {

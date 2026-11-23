@@ -69,6 +69,7 @@ fn test_snapshot(boot_id: &str, revision: u64) -> crate::protocol::ClientShellSn
         commands: Vec::new(),
         claude_sessions: Vec::new(),
         right_panel_tabs: Vec::new(),
+        right_panel: None,
     }
 }
 
@@ -437,6 +438,7 @@ fn activation_requires_an_exact_snapshot_surface_revision_pair() {
         commands: Vec::new(),
         claude_sessions: Vec::new(),
         right_panel_tabs: Vec::new(),
+        right_panel: None,
     };
     assert_eq!(
         activation.receive_snapshot(&target, 7, &snapshot),

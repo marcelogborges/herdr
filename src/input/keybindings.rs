@@ -64,6 +64,9 @@ pub(crate) enum KeybindAction {
     ToggleRightPanel,
     RightPanelNextMode,
     RightPanelPreviousMode,
+    RightPanelView(usize),
+    RightPanelNextTab,
+    RightPanelPreviousTab,
     CyclePaneNext,
     CyclePanePrevious,
     LastPane,
@@ -162,6 +165,14 @@ pub(crate) fn resolve_non_indexed_action(
             &keybinds.right_panel_previous_mode,
             KeybindAction::RightPanelPreviousMode,
         ),
+        (
+            &keybinds.right_panel_next_tab,
+            KeybindAction::RightPanelNextTab,
+        ),
+        (
+            &keybinds.right_panel_previous_tab,
+            KeybindAction::RightPanelPreviousTab,
+        ),
         (&keybinds.reload_config, KeybindAction::ReloadConfig),
         (
             &keybinds.open_notification_target,
@@ -227,6 +238,13 @@ pub(crate) fn resolve_indexed_action(
             if trigger_matches(binding) {
                 if let Some(index) = binding.matched_index(key) {
                     return Some(KeybindAction::FocusAgent(index));
+                }
+            }
+        }
+        for binding in &keybinds.right_panel_view {
+            if trigger_matches(binding) {
+                if let Some(index) = binding.matched_index(key) {
+                    return Some(KeybindAction::RightPanelView(index));
                 }
             }
         }

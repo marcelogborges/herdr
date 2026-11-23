@@ -195,11 +195,23 @@ pub(crate) fn keybind_help_groups(
                 ),
                 entry(
                     binding_label(&keybinds.right_panel_next_mode),
-                    "right panel next mode",
+                    "right panel next view",
                 ),
                 entry(
                     binding_label(&keybinds.right_panel_previous_mode),
-                    "right panel previous mode",
+                    "right panel previous view",
+                ),
+                entry(
+                    indexed_label(&keybinds.right_panel_view),
+                    "right panel view 1-9",
+                ),
+                entry(
+                    binding_label(&keybinds.right_panel_next_tab),
+                    "right panel next tab",
+                ),
+                entry(
+                    binding_label(&keybinds.right_panel_previous_tab),
+                    "right panel previous tab",
                 ),
                 entry(binding_label(&keybinds.focus_pane_left), "focus pane left"),
                 entry(binding_label(&keybinds.focus_pane_down), "focus pane down"),

@@ -6645,6 +6645,7 @@ fn install_test_right_panel(
         terminal_id: crate::terminal::TerminalId::alloc(),
         spawned_at: std::time::Instant::now(),
         exited: false,
+        exited_at: None,
     };
     let (runtime, _input_rx) =
         crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
@@ -6728,7 +6729,7 @@ async fn right_panel_resize_reports_cell_pixels_when_the_grid_already_fits() {
         .right_panel
         .panel_rect(Some(owner), area)
         .expect("panel rect");
-    let content = crate::right_panel::content_rect(panel);
+    let content = crate::right_panel::content_rect(panel, 1);
     let instance = install_test_right_panel(&mut server, b"", content.width, content.height);
     let runtime = server
         .app

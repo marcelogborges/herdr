@@ -953,6 +953,20 @@ pub struct ClientShellSnapshot {
     pub claude_sessions: Vec<ClientShellClaudeSession>,
     #[serde(default)]
     pub right_panel_tabs: Vec<String>,
+    /// Right panel views and the focused pane's panel state, for header and activity bar hits.
+    #[serde(default)]
+    pub right_panel: Option<ClientShellRightPanel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ClientShellRightPanel {
+    pub views: Vec<crate::right_panel::RightPanelView>,
+    /// Whether the activity bar occupies the right edge of the pane surface.
+    pub activity_bar: bool,
+    pub visible: bool,
+    pub mode: crate::right_panel::RightPanelMode,
+    /// Whether the shown tab's command exited and waits to be reopened or closed.
+    pub exited: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2886,6 +2900,7 @@ mod tests {
                 pane_id: Some("w1:p1".into()),
             }],
             right_panel_tabs: vec!["rails c".into()],
+            right_panel: None,
         }));
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
         let (decoded, _): (ServerMessage, _) =

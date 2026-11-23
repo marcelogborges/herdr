@@ -948,10 +948,12 @@ command = "awsx"
                 super::super::RightPanelTabConfig {
                     label: "rails c".into(),
                     command: "~/bin/rails-c".into(),
+                    ..Default::default()
                 },
                 super::super::RightPanelTabConfig {
                     label: "awsx".into(),
                     command: "awsx".into(),
+                    ..Default::default()
                 },
             ]
         );
@@ -966,6 +968,64 @@ command = "awsx"
         );
         assert_eq!(loaded.diagnostics, diagnostics);
         assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_reads_the_activity_bar_and_tab_icons_groups_and_tags() {
+        let loaded = load_live_config_from_str(
+            r#"
+[right_panel]
+activity_bar = "when_open"
+files_icon = "F"
+
+[[right_panel.tabs]]
+label = "rails c"
+command = "rails c"
+icon = " R "
+group = " ops "
+tag = "prod"
+
+[[right_panel.tabs]]
+label = "awsx"
+command = "awsx"
+group = "ops"
+icon = "  "
+"#,
+        )
+        .unwrap();
+
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+        let right_panel = &loaded.config.right_panel;
+        assert_eq!(
+            right_panel.activity_bar,
+            super::super::RightPanelActivityBarConfig::WhenOpen
+        );
+        assert_eq!(right_panel.files_icon.as_deref(), Some("F"));
+        let (tabs, _) = right_panel.resolved_tabs();
+        assert_eq!(
+            tabs.iter()
+                .map(|tab| (
+                    tab.icon.as_deref(),
+                    tab.group.as_deref(),
+                    tab.tag.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("R"), Some("ops"), Some("prod")),
+                (None, Some("ops"), None),
+            ]
+        );
+        assert_eq!(
+            load_live_config_from_str("")
+                .unwrap()
+                .config
+                .right_panel
+                .activity_bar,
+            super::super::RightPanelActivityBarConfig::Off
+        );
+        let invalid =
+            load_live_config_from_str("[right_panel]\nactivity_bar = \"sometimes\"\n").unwrap();
+        assert!(!invalid.diagnostics.is_empty());
     }
 
     #[test]

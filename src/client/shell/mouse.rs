@@ -760,6 +760,9 @@ impl ClientShellState {
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
+        if mouse.kind == MouseEventKind::Moved && self.overlay.is_none() {
+            self.hover_right_panel_activity_bar(point, outcome);
+        }
         if self.mode == ClientShellMode::Navigate
             && self.workspace_preview_action_blocked()
             && self.overlay.is_none()
@@ -2267,6 +2270,9 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
+                if self.handle_right_panel_activity_bar_click(point, outcome) {
+                    return;
+                }
                 if self.start_right_panel_width_drag(point, outcome) {
                     return;
                 }
@@ -2463,26 +2469,90 @@ impl ClientShellState {
         else {
             return false;
         };
-        let custom_labels = self
-            .snapshot
-            .as_deref()
-            .map(|snapshot| snapshot.right_panel_tabs.as_slice())
-            .unwrap_or_default();
-        let modes = crate::right_panel::header_modes(custom_labels);
-        let Some((mode, _)) = crate::right_panel::header_tabs(panel, &modes)
-            .into_iter()
-            .find(|(_, rect)| super::contains(*rect, point))
+        let projection = self.right_panel_projection();
+        let Some(view) = projection
+            .views
+            .iter()
+            .find(|view| view.contains(&projection.mode))
         else {
             return false;
         };
-        self.mode = ClientShellMode::Terminal;
-        self.push_endpoint_method(
+        let layout = crate::right_panel::header_layout(panel, view, &projection.mode);
+        let method = if layout
+            .close
+            .is_some_and(|close| super::contains(close, point))
+        {
+            crate::api::schema::Method::RightPanelHide(crate::api::schema::EmptyParams {})
+        } else if let Some(mode) = layout
+            .tabs
+            .into_iter()
+            .find(|(_, rect)| super::contains(*rect, point))
+            .map(|(mode, _)| mode)
+            .or_else(|| {
+                layout
+                    .overflow
+                    .filter(|(rect, _, _)| super::contains(*rect, point))
+                    .map(|(_, mode, _)| mode)
+            })
+        {
             crate::api::schema::Method::RightPanelShow(crate::api::schema::RightPanelShowParams {
                 mode,
-            }),
-            outcome,
-        );
+            })
+        } else {
+            return false;
+        };
+        self.mode = ClientShellMode::Terminal;
+        self.push_endpoint_method(method, outcome);
         true
+    }
+
+    fn handle_right_panel_activity_bar_click(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        if !self
+            .hits
+            .right_panel_bar
+            .is_some_and(|bar| super::contains(bar, point))
+        {
+            return false;
+        }
+        if let Some(view) = self
+            .hits
+            .right_panel_icons
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+            .map(|(_, view)| *view)
+        {
+            self.mode = ClientShellMode::Terminal;
+            self.push_endpoint_method(
+                crate::api::schema::Method::RightPanelActivateView(
+                    crate::api::schema::RightPanelActivateViewParams {
+                        view: u32::try_from(view).unwrap_or(u32::MAX),
+                    },
+                ),
+                outcome,
+            );
+        }
+        true
+    }
+
+    fn hover_right_panel_activity_bar(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) {
+        let hovered = self
+            .hits
+            .right_panel_icons
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+            .map(|(_, view)| *view);
+        if self.right_panel_bar_hover != hovered {
+            self.right_panel_bar_hover = hovered;
+            outcome.repaint = true;
+        }
     }
 
     fn pane_mouse_position(&self, hit: &PaneHit, mouse: MouseEvent) -> ClientMousePosition {

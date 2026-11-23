@@ -1133,6 +1133,21 @@ impl App {
                 self.set_right_panel_width(params.width);
                 return responses::encode_success(request.id, ResponseResult::Ok {});
             }
+            Method::RightPanelActivateView(params) => {
+                return self.handle_right_panel_activate_view(request.id, params)
+            }
+            Method::RightPanelCycleTab(params) => {
+                self.cycle_right_panel_tab(params.direction);
+                return responses::encode_success(request.id, ResponseResult::Ok {});
+            }
+            Method::RightPanelHide(_) => {
+                self.hide_right_panel();
+                return responses::encode_success(request.id, ResponseResult::Ok {});
+            }
+            Method::RightPanelRestart(_) => {
+                self.restart_right_panel();
+                return responses::encode_success(request.id, ResponseResult::Ok {});
+            }
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),
             Method::TabMove(params) => return self.handle_tab_move(request.id, params),

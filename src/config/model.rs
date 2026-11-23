@@ -469,10 +469,16 @@ pub struct KeysConfig {
     pub toggle_sidebar: BindingConfig,
     /// Toggle the right panel. Default: "prefix+i"
     pub toggle_right_panel: BindingConfig,
-    /// Switch the right panel to the next mode (files, then custom tabs), opening it if hidden. Default: "alt+q"
+    /// Switch the right panel to the next view, opening it if hidden. Default: "alt+q"
     pub right_panel_next_mode: BindingConfig,
-    /// Switch the right panel to the previous mode (files, then custom tabs), opening it if hidden. Default: "alt+e"
+    /// Switch the right panel to the previous view, opening it if hidden. Default: "alt+e"
     pub right_panel_previous_mode: BindingConfig,
+    /// Open right panel view N (files is 1), or close the panel when it already shows that view. Unset by default.
+    pub right_panel_view: BindingConfig,
+    /// Show the next tab inside the right panel's group view. Unset by default.
+    pub right_panel_next_tab: BindingConfig,
+    /// Show the previous tab inside the right panel's group view. Unset by default.
+    pub right_panel_previous_tab: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
     pub indexed: IndexedKeysConfig,
     /// Prefix-mode custom command bindings.
@@ -616,6 +622,12 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     right_panel_previous_mode: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    right_panel_view: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    right_panel_next_tab: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    right_panel_previous_tab: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
@@ -730,6 +742,9 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(toggle_right_panel);
         apply_field!(right_panel_next_mode);
         apply_field!(right_panel_previous_mode);
+        apply_field!(right_panel_view);
+        apply_field!(right_panel_next_tab);
+        apply_field!(right_panel_previous_tab);
         apply_field!(indexed);
         apply_field!(command);
 
@@ -841,6 +856,9 @@ impl KeysConfig {
             right_panel_previous_mode,
             keybinds.right_panel_previous_mode
         );
+        copy_effective_indexed_field!(right_panel_view, keybinds.right_panel_view);
+        copy_effective_action_field!(right_panel_next_tab, keybinds.right_panel_next_tab);
+        copy_effective_action_field!(right_panel_previous_tab, keybinds.right_panel_previous_tab);
         copy_user_field!(indexed);
 
         profile
@@ -974,7 +992,21 @@ pub struct RightPanelConfig {
     pub files_command: String,
     /// Command `right_panel.open` runs for a file; {path}, {dir}, and {line} are substituted.
     pub open_command: String,
+    /// When the right panel's activity bar shows. Default: off.
+    pub activity_bar: RightPanelActivityBarConfig,
+    /// Icon for the built-in files view. Default: the label's first letter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_icon: Option<String>,
     pub tabs: Vec<RightPanelTabConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RightPanelActivityBarConfig {
+    Always,
+    WhenOpen,
+    #[default]
+    Off,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -982,6 +1014,19 @@ pub struct RightPanelConfig {
 pub struct RightPanelTabConfig {
     pub label: String,
     pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+}
+
+fn trimmed_option(value: Option<&String>) -> Option<String> {
+    value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 impl RightPanelConfig {
@@ -1012,6 +1057,9 @@ impl RightPanelConfig {
                 None => tabs.push(RightPanelTabConfig {
                     label: label.to_owned(),
                     command: command.to_owned(),
+                    icon: trimmed_option(tab.icon.as_ref()),
+                    group: trimmed_option(tab.group.as_ref()),
+                    tag: trimmed_option(tab.tag.as_ref()),
                 }),
             }
         }
@@ -1030,6 +1078,8 @@ impl Default for RightPanelConfig {
         Self {
             files_command: "yazi".to_owned(),
             open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
+            activity_bar: RightPanelActivityBarConfig::default(),
+            files_icon: None,
             tabs: Vec::new(),
         }
     }
@@ -1286,6 +1336,9 @@ impl Default for KeysConfig {
             toggle_right_panel: BindingConfig::one("prefix+i"),
             right_panel_next_mode: BindingConfig::one("alt+q"),
             right_panel_previous_mode: BindingConfig::one("alt+e"),
+            right_panel_view: BindingConfig::empty(),
+            right_panel_next_tab: BindingConfig::empty(),
+            right_panel_previous_tab: BindingConfig::empty(),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
             user_fields: BTreeSet::new(),

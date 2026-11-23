@@ -681,6 +681,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return None;
                 }
+                if let Some(method) = self.exited_right_panel_key(key) {
+                    self.push_endpoint_method(method, outcome);
+                    return None;
+                }
                 self.focused_pane_id().map(ClientInputTarget::Pane)
             }
             ClientShellMode::Prefix => {
@@ -1082,6 +1086,31 @@ impl ClientShellState {
                 .selection
                 .as_ref()
                 .is_some_and(crate::selection::Selection::is_visible),
+        }
+    }
+
+    /// Enter reopens and Esc closes a focused right panel whose command exited.
+    fn exited_right_panel_key(
+        &self,
+        key: &crate::input::TerminalKey,
+    ) -> Option<crate::api::schema::Method> {
+        if key.kind != KeyEventKind::Press || !key.modifiers.is_empty() {
+            return None;
+        }
+        let focused = self.focused_pane_id()?;
+        crate::right_panel::parse_public_id(&focused)?;
+        let snapshot = self.snapshot.as_deref()?;
+        if !snapshot.right_panel.as_ref()?.exited {
+            return None;
+        }
+        match key.code {
+            KeyCode::Enter => Some(crate::api::schema::Method::RightPanelRestart(
+                crate::api::schema::EmptyParams {},
+            )),
+            KeyCode::Esc => Some(crate::api::schema::Method::RightPanelHide(
+                crate::api::schema::EmptyParams {},
+            )),
+            _ => None,
         }
     }
 

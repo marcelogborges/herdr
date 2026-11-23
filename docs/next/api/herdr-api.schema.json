@@ -3873,6 +3873,20 @@
           ],
           "type": "object"
         },
+        "RightPanelActivateViewParams": {
+          "description": "Zero-based position of a view in the activity bar; files is view 0.",
+          "properties": {
+            "view": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "view"
+          ],
+          "type": "object"
+        },
         "RightPanelCycleDirection": {
           "enum": [
             "next",
@@ -5444,6 +5458,70 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/RightPanelSetWidthParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.activate_view",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelActivateViewParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.cycle_tab",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/RightPanelCycleParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.hide",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "right_panel.restart",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
             }
           },
           "required": [

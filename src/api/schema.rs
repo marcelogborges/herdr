@@ -85,6 +85,10 @@ operations::define_operations! {
     RightPanelCycle(RightPanelCycleParams) => "right_panel.cycle", true, true;
     RightPanelOpen(RightPanelOpenParams) => "right_panel.open", true, false;
     RightPanelSetWidth(RightPanelSetWidthParams) => "right_panel.set_width", true, true;
+    RightPanelActivateView(RightPanelActivateViewParams) => "right_panel.activate_view", true, true;
+    RightPanelCycleTab(RightPanelCycleParams) => "right_panel.cycle_tab", true, true;
+    RightPanelHide(EmptyParams) => "right_panel.hide", true, true;
+    RightPanelRestart(EmptyParams) => "right_panel.restart", true, true;
     AgentList(EmptyParams) => "agent.list", false, false;
     AgentGet(AgentTarget) => "agent.get", false, false;
     AgentRead(AgentReadParams) => "agent.read", false, false;

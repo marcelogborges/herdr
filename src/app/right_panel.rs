@@ -59,8 +59,68 @@ impl App {
             return;
         };
         self.release_exited_right_panel_instances(owner);
+        self.state.right_panel.set_mode(owner, mode);
         let pane = self.state.right_panel.pane_mut(owner);
-        pane.mode = mode;
+        pane.visible = true;
+        pane.focused = true;
+        self.request_right_panel_render();
+    }
+
+    /// Opens a view on its last tab, or closes the panel when that view is already shown.
+    pub(crate) fn activate_right_panel_view(&mut self, index: usize) -> bool {
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return false;
+        };
+        let Some(mode) = self.state.right_panel.view_mode(owner, index) else {
+            return false;
+        };
+        let shown = self.state.right_panel.pane(owner).is_some_and(|pane| {
+            pane.visible
+                && right_panel::view_index(&self.state.right_panel.views, &pane.mode) == Some(index)
+        });
+        if shown {
+            self.hide_right_panel();
+        } else {
+            self.show_right_panel(mode);
+        }
+        true
+    }
+
+    pub(crate) fn cycle_right_panel_tab(&mut self, direction: RightPanelCycleDirection) {
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        self.release_exited_right_panel_instances(owner);
+        let current = self.state.right_panel.pane_mut(owner).mode.clone();
+        let mode = self.state.right_panel.cycled_tab(&current, direction);
+        self.state.right_panel.set_mode(owner, mode);
+        let pane = self.state.right_panel.pane_mut(owner);
+        if !pane.visible {
+            pane.visible = true;
+            pane.focused = true;
+        }
+        self.request_right_panel_render();
+    }
+
+    pub(crate) fn hide_right_panel(&mut self) {
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        self.release_exited_right_panel_instances(owner);
+        let pane = self.state.right_panel.pane_mut(owner);
+        pane.visible = false;
+        pane.focused = false;
+        pane.pending_open = None;
+        self.request_right_panel_render();
+    }
+
+    /// Starts the shown tab again after its command exited.
+    pub(crate) fn restart_right_panel(&mut self) {
+        let Some((_, owner)) = self.state.focused_right_panel_owner() else {
+            return;
+        };
+        self.release_exited_right_panel_instances(owner);
+        let pane = self.state.right_panel.pane_mut(owner);
         pane.visible = true;
         pane.focused = true;
         self.request_right_panel_render();
@@ -72,9 +132,9 @@ impl App {
         };
         self.release_exited_right_panel_instances(owner);
         let current = self.state.right_panel.pane_mut(owner).mode.clone();
-        let mode = self.state.right_panel.cycled(&current, direction);
+        let mode = self.state.right_panel.cycled(owner, &current, direction);
+        self.state.right_panel.set_mode(owner, mode);
         let pane = self.state.right_panel.pane_mut(owner);
-        pane.mode = mode;
         if !pane.visible {
             pane.visible = true;
             pane.focused = true;
@@ -213,8 +273,23 @@ impl App {
         else {
             return false;
         };
-        if let crate::right_panel::PanelExit::Released(instance) = exit {
-            self.release_right_panel_instance(instance);
+        match exit {
+            crate::right_panel::PanelExit::Released(instance) => {
+                self.release_right_panel_instance(instance);
+            }
+            crate::right_panel::PanelExit::KeptFailedStart => {
+                let exited_at = crate::platform::local_datetime()
+                    .map(|time| format!("{:02}:{:02}", time.hour(), time.minute()));
+                if let Some(instance) = self
+                    .state
+                    .right_panel
+                    .instances
+                    .iter_mut()
+                    .find(|instance| instance.pane_id == pane_id)
+                {
+                    instance.exited_at = exited_at;
+                }
+            }
         }
         self.request_right_panel_render();
         true
@@ -323,7 +398,7 @@ impl App {
         command: String,
         panel: Rect,
     ) {
-        let content = right_panel::content_rect(panel);
+        let content = right_panel::content_rect(panel, self.state.right_panel.header_rows(&mode));
         match self.spawn_right_panel_instance(
             owner,
             mode,
@@ -447,6 +522,7 @@ impl App {
             terminal_id,
             spawned_at: std::time::Instant::now(),
             exited: false,
+            exited_at: None,
         })
     }
 
@@ -515,6 +591,7 @@ mod tests {
             terminal_id: TerminalId::alloc(),
             spawned_at: std::time::Instant::now(),
             exited: false,
+            exited_at: None,
         };
         app.state.terminals.insert(
             instance.terminal_id.clone(),
@@ -629,6 +706,7 @@ mod tests {
                 .map(|label| crate::config::RightPanelTabConfig {
                     label: (*label).into(),
                     command: "sleep 30".into(),
+                    ..Default::default()
                 })
                 .collect(),
             ..Default::default()
@@ -639,6 +717,174 @@ mod tests {
 
     fn custom(label: &str) -> RightPanelMode {
         RightPanelMode::Custom(label.into())
+    }
+
+    fn configure_ops(app: &mut App) {
+        let tab = |label: &str, group: Option<&str>| crate::config::RightPanelTabConfig {
+            label: label.into(),
+            command: "sleep 30".into(),
+            group: group.map(str::to_owned),
+            ..Default::default()
+        };
+        let config = crate::config::RightPanelConfig {
+            tabs: vec![
+                tab("vigias", None),
+                tab("rails c", Some("ops")),
+                tab("awsx", Some("ops")),
+            ],
+            ..Default::default()
+        };
+        let width = app.state.right_panel.width;
+        app.apply_right_panel_config(width, &config);
+    }
+
+    #[test]
+    fn activating_a_view_opens_it_and_activating_it_again_closes_the_panel() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_ops(&mut app);
+
+        assert!(app.activate_right_panel_view(1));
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && pane.focused);
+        assert_eq!(pane.mode, custom("vigias"));
+
+        assert!(app.activate_right_panel_view(2));
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            custom("rails c")
+        );
+
+        assert!(app.activate_right_panel_view(2));
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(!pane.visible && !pane.focused);
+        assert!(!app.activate_right_panel_view(7));
+    }
+
+    #[test]
+    fn a_group_view_reopens_on_its_last_tab_and_tabs_cycle_inside_it() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_ops(&mut app);
+        app.activate_right_panel_view(2);
+
+        app.cycle_right_panel_tab(RightPanelCycleDirection::Next);
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            custom("awsx")
+        );
+        app.cycle_right_panel_tab(RightPanelCycleDirection::Next);
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            custom("rails c")
+        );
+        app.cycle_right_panel_tab(RightPanelCycleDirection::Previous);
+
+        app.activate_right_panel_view(0);
+        app.cycle_right_panel(RightPanelCycleDirection::Next);
+        app.cycle_right_panel(RightPanelCycleDirection::Next);
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            custom("awsx")
+        );
+        app.cycle_right_panel_tab(RightPanelCycleDirection::Next);
+        app.activate_right_panel_view(1);
+        app.activate_right_panel_view(2);
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            custom("rails c")
+        );
+    }
+
+    #[test]
+    fn hide_releases_an_exited_tab_and_restart_shows_it_again() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_tabs(&mut app, &["logs"]);
+        let logs = install_instance(&mut app, owner, custom("logs"), "/a");
+        app.show_right_panel(custom("logs"));
+        app.right_panel_pane_died(logs.pane_id);
+        assert!(app.state.right_panel.displayed(owner).unwrap().exited);
+
+        app.restart_right_panel();
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && pane.focused);
+        assert_eq!(pane.mode, custom("logs"));
+        assert!(app.state.right_panel.instances.is_empty());
+        assert!(!app.state.terminals.contains_key(&logs.terminal_id));
+
+        let again = install_instance(&mut app, owner, custom("logs"), "/a");
+        app.right_panel_pane_died(again.pane_id);
+        app.hide_right_panel();
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(!pane.visible && !pane.focused);
+        assert!(app.state.right_panel.instances.is_empty());
+    }
+
+    #[test]
+    fn an_early_exit_records_the_local_time_for_the_card() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_tabs(&mut app, &["logs"]);
+        let logs = install_instance(&mut app, owner, custom("logs"), "/a");
+        app.show_right_panel(custom("logs"));
+
+        app.right_panel_pane_died(logs.pane_id);
+
+        let exited_at = app
+            .state
+            .right_panel
+            .displayed(owner)
+            .unwrap()
+            .exited_at
+            .clone();
+        if crate::platform::local_datetime().is_some() {
+            let exited_at = exited_at.expect("exit time");
+            assert_eq!(exited_at.len(), 5);
+            assert_eq!(&exited_at[2..3], ":");
+        }
+    }
+
+    #[tokio::test]
+    async fn tabs_start_only_when_first_shown_and_stay_alive_across_views() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_ops(&mut app);
+        let files = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
+
+        app.activate_right_panel_view(2);
+        app.sync_right_panel(target(), PANEL);
+        let started = |app: &App| {
+            app.state
+                .right_panel
+                .instances
+                .iter()
+                .map(|instance| instance.mode.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            started(&app),
+            vec![RightPanelMode::Files, custom("rails c")]
+        );
+        let rails = app.state.right_panel.displayed(owner).cloned().unwrap();
+        let header_rows = app.state.right_panel.header_rows(&rails.mode);
+        assert_eq!(
+            app.terminal_runtimes
+                .get(&rails.terminal_id)
+                .unwrap()
+                .current_size(),
+            (PANEL.height - header_rows, PANEL.width - 1)
+        );
+
+        app.activate_right_panel_view(0);
+        app.sync_right_panel(target(), PANEL);
+
+        assert_eq!(displayed(&app, owner), Some(files.terminal_id));
+        assert!(app.state.terminals.contains_key(&rails.terminal_id));
+        assert_eq!(started(&app).len(), 2);
+        app.release_right_panel_instance(rails);
     }
 
     #[test]

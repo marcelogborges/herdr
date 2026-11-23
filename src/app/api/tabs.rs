@@ -161,6 +161,23 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
+    pub(super) fn handle_right_panel_activate_view(
+        &mut self,
+        id: String,
+        params: crate::api::schema::RightPanelActivateViewParams,
+    ) -> String {
+        let index = usize::try_from(params.view).unwrap_or(usize::MAX);
+        if index >= self.state.right_panel.views.len() {
+            return encode_error(
+                id,
+                "unknown_view",
+                format!("unknown right panel view {}", params.view),
+            );
+        }
+        self.activate_right_panel_view(index);
+        encode_success(id, ResponseResult::Ok {})
+    }
+
     pub(super) fn handle_right_panel_cycle(
         &mut self,
         id: String,
@@ -746,6 +763,7 @@ mod tests {
             tabs: vec![crate::config::RightPanelTabConfig {
                 label: "rails c".into(),
                 command: "sleep 30".into(),
+                ..Default::default()
             }],
             ..Default::default()
         };
@@ -772,6 +790,24 @@ mod tests {
             app.state.right_panel.pane(owner).unwrap().mode,
             crate::right_panel::RightPanelMode::Files
         );
+    }
+
+    #[test]
+    fn right_panel_activate_view_rejects_views_past_the_activity_bar() {
+        let mut app = claude_session_test_app();
+        let owner = app.state.workspaces[0].focused_pane_id().unwrap();
+        let activate = |app: &mut App, view: u32| {
+            app.handle_right_panel_activate_view(
+                "req".into(),
+                crate::api::schema::RightPanelActivateViewParams { view },
+            )
+        };
+
+        assert!(activate(&mut app, 1).contains("unknown_view"));
+        assert!(activate(&mut app, 0).contains("\"result\""));
+        assert!(app.state.right_panel.is_visible_for(Some(owner)));
+        assert!(activate(&mut app, 0).contains("\"result\""));
+        assert!(!app.state.right_panel.is_visible_for(Some(owner)));
     }
 
     #[tokio::test]
