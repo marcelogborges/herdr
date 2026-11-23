@@ -112,9 +112,9 @@ To delete a worktree checkout, use `Delete worktree checkout...` on a grouped ch
 
 ## Right panel
 
-`prefix+i` toggles a panel docked on the right edge with three tabs, `files`,
-`diff`, and `jira`. Each tab runs a real terminal command, so the panel works with any TUI
-file manager, editor, or Git client:
+`prefix+i` toggles a panel docked on the right edge. Its built-in `files` tab
+runs a real terminal command, so the panel works with any TUI file manager or
+editor:
 
 ```toml
 [ui]
@@ -122,9 +122,7 @@ right_panel_width = "45%"
 
 [right_panel]
 files_command = "yazi"
-diff_command = "lazygit"
 open_command = "micro +{line} {path}; exec yazi {path}"
-jira_command = '"$HERDR_BIN_PATH" jira'
 ```
 
 The panel belongs to each pane. Every pane has its own visibility, tab, and
@@ -138,8 +136,8 @@ returns to `right_panel_width`. The dragged width lasts until the server
 restarts. Quitting the panel command closes that terminal and hides that
 pane's panel, and closing a pane closes its panel terminals.
 
-Add your own tabs with `[[right_panel.tabs]]`. They appear after `files`,
-`diff`, and `jira` in the header, take part in `alt+q`/`alt+e` cycling and
+Add your own tabs with `[[right_panel.tabs]]`, for example a Git client such as
+`lazygit`. They appear after `files` in the header, take part in `alt+q`/`alt+e` cycling and
 header clicks, and keep one terminal per pane like the built-in tabs:
 
 ```toml
@@ -160,40 +158,6 @@ falls back to `files`. `right_panel.show` accepts a custom tab's label as its
 `mode`. Every panel command receives `HERDR_PANEL_OWNER_PANE_ID` and
 `HERDR_SESSION_REPOS`, the newline-separated repositories the owner pane's
 Claude Code session has touched, most recent first (empty when there is none).
-
-The `jira` tab runs `herdr jira`, an interactive board for your Jira Cloud
-issues. Configure the site, account, and project, and export the API token in
-the environment the Herdr server starts from:
-
-```toml
-[jira]
-site = "https://example.atlassian.net"
-email = "you@example.com"
-project = "ABC"
-token_env = "JIRA_API_TOKEN"
-```
-
-The board groups your open issues by status (`status_order`), marks issues
-that have a Claude Code session with a dot colored by the agent's state, and
-preselects the issue linked to the pane that owns the panel. A session links to
-an issue when its task code or worktree name starts with the issue key. Use the
-keyboard or click: `m` moves the issue through a valid workflow transition, `c`
-comments, `a` assigns it to you, `o` opens it in the browser, `w` focuses its
-session (resuming a closed one in a new tab, or opening a tab in a matching
-`<repo>-worktrees/<KEY>` checkout under `worktree_roots`), `r` refreshes, and
-`L` runs `worktree_gc_command` (default `vk-wt gc`) as a dry-run, lists the
-worktrees it would remove, and appends `--apply` only after you confirm.
-Enter or a double click opens the detail view with the description, comments,
-sprint, story points, and a live development summary. Two collapsible sections
-follow the fields: pull requests (status and a clickable link, toggled with `p`)
-and worktrees (every `<repo>-worktrees/<KEY>*` checkout under `worktree_roots`
-with its branch and the pull request opened from it, toggled with `t`). Clicking
-a worktree focuses the Claude Code session running in it or opens a new tab
-there. Groups start collapsed except the one holding the preselected issue. The
-list refreshes in the
-background every `refresh_seconds`. Transitions that require extra fields open
-the issue in the browser instead.
-
 
 Remote attach manages its SSH connection with temporary keepalives and, where supported, connection reuse by default.
 

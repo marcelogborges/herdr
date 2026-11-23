@@ -22,9 +22,7 @@ macro_rules! println {
 pub(crate) mod agent;
 mod api;
 mod completion;
-pub(crate) mod diff;
 mod integration;
-pub(crate) mod jira;
 mod machine;
 pub(crate) mod notification;
 pub(crate) mod pane;
@@ -132,8 +130,6 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "tab" => tab::run_tab_command(&args[2..])?,
         "notification" => notification::run_notification_command(&args[2..])?,
         "right-panel" => right_panel::run_right_panel_command(&args[2..])?,
-        "jira" => jira::run_jira_command(&args[2..])?,
-        "diff" => diff::run_diff_command(&args[2..])?,
         "agent" => agent::run_agent_command(&args[2..])?,
         "terminal" => run_terminal_command(&args[2..])?,
         "pane" => pane::run_pane_command(&args[2..])?,

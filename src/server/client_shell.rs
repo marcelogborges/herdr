@@ -630,7 +630,7 @@ fn render_right_panel(
 
     if instance.exited {
         let notice = format!(
-            " {} exited · click files/diff or prefix+i to close ",
+            " {} exited · click a tab or prefix+i to close ",
             state.command(&instance.mode).unwrap_or_default()
         );
         let row = content.y + content.height - 1;

@@ -268,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             actual.remove("right_panel.show").as_deref(),
-            Some("442775ee8161dc5ff9fb2d405eeb82b577f7fca363c1fd418b40585a1b65d6ba")
+            Some("238db9ff958ed949cfab43f516c389756b51124226027f05c616e196510d0012")
         );
         assert_eq!(
             actual.remove("right_panel.toggle").as_deref(),

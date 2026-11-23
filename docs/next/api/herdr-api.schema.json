@@ -3895,9 +3895,7 @@
           "anyOf": [
             {
               "enum": [
-                "files",
-                "diff",
-                "jira"
+                "files"
               ],
               "type": "string"
             },

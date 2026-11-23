@@ -572,14 +572,12 @@ mod tests {
     fn mode_is_per_pane() {
         let mut app = test_app();
         let (a, b) = split(&mut app);
-        app.show_right_panel(RightPanelMode::Diff);
+        configure_tabs(&mut app, &["logs"]);
+        app.show_right_panel(custom("logs"));
         app.state.focus_pane_in_workspace(0, b);
         app.show_right_panel(RightPanelMode::Files);
 
-        assert_eq!(
-            app.state.right_panel.pane(a).unwrap().mode,
-            RightPanelMode::Diff
-        );
+        assert_eq!(app.state.right_panel.pane(a).unwrap().mode, custom("logs"));
         assert_eq!(
             app.state.right_panel.pane(b).unwrap().mode,
             RightPanelMode::Files
@@ -590,6 +588,7 @@ mod tests {
     fn cycle_next_walks_the_header_order_and_wraps() {
         let mut app = test_app();
         let owner = focused(&app);
+        configure_tabs(&mut app, &["logs", "jobs"]);
         app.show_right_panel(RightPanelMode::Files);
 
         let mut seen = Vec::new();
@@ -600,11 +599,7 @@ mod tests {
 
         assert_eq!(
             seen,
-            vec![
-                RightPanelMode::Diff,
-                RightPanelMode::Jira,
-                RightPanelMode::Files
-            ]
+            vec![custom("logs"), custom("jobs"), RightPanelMode::Files]
         );
     }
 
@@ -612,6 +607,7 @@ mod tests {
     fn cycle_previous_walks_backwards_and_wraps() {
         let mut app = test_app();
         let owner = focused(&app);
+        configure_tabs(&mut app, &["logs", "jobs"]);
         app.show_right_panel(RightPanelMode::Files);
 
         let mut seen = Vec::new();
@@ -622,11 +618,7 @@ mod tests {
 
         assert_eq!(
             seen,
-            vec![
-                RightPanelMode::Jira,
-                RightPanelMode::Diff,
-                RightPanelMode::Files
-            ]
+            vec![custom("jobs"), custom("logs"), RightPanelMode::Files]
         );
     }
 
@@ -654,7 +646,7 @@ mod tests {
         let mut app = test_app();
         let owner = focused(&app);
         configure_tabs(&mut app, &["rails c", "awsx"]);
-        app.show_right_panel(RightPanelMode::Jira);
+        app.show_right_panel(RightPanelMode::Files);
 
         let mut seen = Vec::new();
         for _ in 0..3 {
@@ -778,18 +770,20 @@ mod tests {
     fn cycle_opens_a_hidden_panel_focused_at_the_resulting_mode() {
         let mut app = test_app();
         let owner = focused(&app);
+        configure_tabs(&mut app, &["logs"]);
 
         app.cycle_right_panel(RightPanelCycleDirection::Next);
 
         let pane = app.state.right_panel.pane(owner).unwrap();
         assert!(pane.visible && pane.focused);
-        assert_eq!(pane.mode, RightPanelMode::Diff);
+        assert_eq!(pane.mode, custom("logs"));
     }
 
     #[test]
     fn cycle_on_a_visible_panel_keeps_keyboard_focus_where_it_is() {
         let mut app = test_app();
         let owner = focused(&app);
+        configure_tabs(&mut app, &["logs"]);
         app.show_right_panel(RightPanelMode::Files);
         app.blur_right_panel();
 
@@ -797,26 +791,21 @@ mod tests {
 
         let pane = app.state.right_panel.pane(owner).unwrap();
         assert!(pane.visible && !pane.focused);
-        assert_eq!(pane.mode, RightPanelMode::Diff);
+        assert_eq!(pane.mode, custom("logs"));
     }
 
     #[test]
     fn cycle_only_changes_the_focused_pane_mode() {
         let mut app = test_app();
         let (a, b) = split(&mut app);
-        app.show_right_panel(RightPanelMode::Diff);
+        configure_tabs(&mut app, &["logs", "jobs"]);
+        app.show_right_panel(custom("logs"));
         app.state.focus_pane_in_workspace(0, b);
 
         app.cycle_right_panel(RightPanelCycleDirection::Previous);
 
-        assert_eq!(
-            app.state.right_panel.pane(a).unwrap().mode,
-            RightPanelMode::Diff
-        );
-        assert_eq!(
-            app.state.right_panel.pane(b).unwrap().mode,
-            RightPanelMode::Jira
-        );
+        assert_eq!(app.state.right_panel.pane(a).unwrap().mode, custom("logs"));
+        assert_eq!(app.state.right_panel.pane(b).unwrap().mode, custom("jobs"));
     }
 
     #[test]
@@ -983,18 +972,19 @@ mod tests {
     fn failed_start_stays_visible_and_the_next_show_respawns() {
         let mut app = test_app();
         let owner = focused(&app);
+        configure_tabs(&mut app, &["logs"]);
         let files = install_instance(&mut app, owner, RightPanelMode::Files, "/a");
-        let diff = install_instance(&mut app, owner, RightPanelMode::Diff, "/a");
-        app.show_right_panel(RightPanelMode::Diff);
+        let logs = install_instance(&mut app, owner, custom("logs"), "/a");
+        app.show_right_panel(custom("logs"));
 
-        assert!(app.right_panel_pane_died(diff.pane_id));
+        assert!(app.right_panel_pane_died(logs.pane_id));
         assert!(app.state.right_panel.is_visible_for(Some(owner)));
-        assert!(app.state.terminals.contains_key(&diff.terminal_id));
+        assert!(app.state.terminals.contains_key(&logs.terminal_id));
 
         app.show_right_panel(RightPanelMode::Files);
 
         assert_eq!(app.state.right_panel.instances, vec![files]);
-        assert!(!app.state.terminals.contains_key(&diff.terminal_id));
+        assert!(!app.state.terminals.contains_key(&logs.terminal_id));
     }
 
     #[test]

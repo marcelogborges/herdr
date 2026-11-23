@@ -239,21 +239,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [worktrees]
 # directory = "~/.herdr/worktrees"
 
-# Right files/diff/jira panel (prefix+i). Commands run in the focused agent's worktree.
+# Right panel (prefix+i). Commands run in the focused agent's worktree.
 # [right_panel]
 # files_command = "yazi"
-# diff_command = '"$HERDR_BIN_PATH" diff'  # or "lazygit"
 # open_command = "micro +{line} {path}; exec yazi {path}"
-# jira_command = '"$HERDR_BIN_PATH" jira'
-
-# Jira board shown in the right panel's jira tab.
-# [jira]
-# site = "https://example.atlassian.net"
-# email = "you@example.com"
-# project = "ABC"
-# token_env = "JIRA_API_TOKEN"
-# refresh_seconds = 60
-# worktree_gc_command = "vk-wt gc"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -357,7 +346,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
 
-# Right files/diff panel width in cells or a percentage.
+# Right panel width in cells or a percentage.
 # right_panel_width = "45%"
 
 # Agent status indicators: "dots" preserves the compact color marks; "symbols" uses
@@ -705,7 +694,7 @@ fn main() -> io::Result<()> {
             ),
             (
                 "herdr right-panel <subcommand>",
-                "Open files in the right files/diff panel",
+                "Open files in the right panel",
             ),
             (
                 "herdr agent <subcommand>",

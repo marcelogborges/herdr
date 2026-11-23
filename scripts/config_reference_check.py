@@ -30,7 +30,7 @@ ROOT_STRUCT = "Config"
 
 # Dotted key prefixes that are open-ended (user-defined tables/arrays) and
 # therefore not enumerable in a flat reference table.
-SKIPPED_SUBTREES = ("keys.command",)
+SKIPPED_SUBTREES = ("keys.command", "right_panel.tabs")
 
 FIELD_RE = re.compile(r"^\s*pub ([a-z_][a-z0-9_]*):\s*(.+?),?\s*$")
 STRUCT_RE = re.compile(r"^\s*pub(?:\(crate\))? struct ([A-Za-z0-9_]+)\s*\{\s*$")
@@ -267,7 +267,8 @@ def check(model_root: Path, reference_path: Path) -> list[str]:
     code_entries = {entry["key"]: entry for entry in collect_entries(model)}
     doc_entries, errors = reference_entries(reference_path)
     code_keys = set(code_entries)
-    doc_keys = set(doc_entries)
+    # Skipped open-ended subtrees may still be documented as a single prose row.
+    doc_keys = set(doc_entries) - set(SKIPPED_SUBTREES)
 
     for missing in sorted(code_keys - doc_keys):
         errors.append(f"{missing}: in src/config but missing from {reference_path}")

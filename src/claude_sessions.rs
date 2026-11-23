@@ -359,10 +359,6 @@ impl RepoResolver {
     }
 }
 
-pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
-    RepoResolver::default().resolve(path)
-}
-
 pub(crate) fn is_repo_root(dir: &Path) -> bool {
     if dir.parent().is_none() {
         return false;
@@ -766,6 +762,10 @@ mod tests {
                 None
             ]
         );
+    }
+
+    fn repo_root(path: &Path) -> Option<PathBuf> {
+        RepoResolver::default().resolve(path)
     }
 
     fn fake_repo(root: &Path, relative: &str) -> PathBuf {

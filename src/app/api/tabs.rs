@@ -756,20 +756,21 @@ mod tests {
             app.handle_right_panel_show("req".into(), params)
         };
 
-        assert!(show(&mut app, "diff").contains("\"result\""));
-        assert_eq!(
-            app.state.right_panel.pane(owner).unwrap().mode,
-            crate::right_panel::RightPanelMode::Diff
-        );
         assert!(show(&mut app, "rails c").contains("\"result\""));
         assert_eq!(
             app.state.right_panel.pane(owner).unwrap().mode,
             crate::right_panel::RightPanelMode::Custom("rails c".into())
         );
+        assert!(show(&mut app, "files").contains("\"result\""));
+        assert_eq!(
+            app.state.right_panel.pane(owner).unwrap().mode,
+            crate::right_panel::RightPanelMode::Files
+        );
+        assert!(show(&mut app, "diff").contains("unknown_mode"));
         assert!(show(&mut app, "nope").contains("unknown_mode"));
         assert_eq!(
             app.state.right_panel.pane(owner).unwrap().mode,
-            crate::right_panel::RightPanelMode::Custom("rails c".into())
+            crate::right_panel::RightPanelMode::Files
         );
     }
 

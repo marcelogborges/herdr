@@ -7,7 +7,6 @@ use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "advanced",
     "experimental",
-    "jira",
     "keys",
     "onboarding",
     "remote",
@@ -368,14 +367,6 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut diagnostics,
         &mut invalid_sections,
         |section| config.right_panel = section,
-    );
-    load_live_section(
-        table,
-        "jira",
-        "jira config",
-        &mut diagnostics,
-        &mut invalid_sections,
-        |section| config.jira = section,
     );
     load_live_section(
         table,
@@ -936,7 +927,7 @@ label = "blank"
 command = "  "
 
 [[right_panel.tabs]]
-label = "diff"
+label = "files"
 command = "lazygit"
 
 [[right_panel.tabs]]
@@ -969,12 +960,50 @@ command = "awsx"
             vec![
                 "right_panel.tabs[1] has an empty label; ignoring tab",
                 "right_panel.tabs[2] \"blank\" has an empty command; ignoring tab",
-                "right_panel.tabs[3] \"diff\" clashes with a built-in tab; ignoring tab",
+                "right_panel.tabs[3] \"files\" clashes with a built-in tab; ignoring tab",
                 "right_panel.tabs[4] \"rails c\" is a duplicate label; ignoring tab",
             ]
         );
         assert_eq!(loaded.diagnostics, diagnostics);
         assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_ignores_removed_jira_and_diff_settings_with_warnings() {
+        let toml = r#"
+[right_panel]
+files_command = "lf"
+diff_command = "lazygit"
+jira_command = '"$HERDR_BIN_PATH" jira'
+
+[jira]
+site = "https://example.atlassian.net"
+project = "ABC"
+"#;
+        let expected = vec![
+            "unknown config section [jira]; ignoring section",
+            "unknown config key right_panel.diff_command; ignoring key",
+            "unknown config key right_panel.jira_command; ignoring key",
+        ];
+
+        let loaded = load_live_config_from_str(toml).unwrap();
+        assert_eq!(loaded.diagnostics, expected);
+        assert!(loaded.invalid_sections.is_empty());
+        assert_eq!(loaded.config.right_panel.files_command, "lf");
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-config-removed-jira-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, toml).unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
+        let loaded = Config::load();
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.diagnostics, expected);
+        assert_eq!(loaded.config.right_panel.files_command, "lf");
     }
 
     #[test]

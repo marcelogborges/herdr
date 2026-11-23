@@ -22,23 +22,15 @@ const DEFAULT_WIDTH_PERCENT: u8 = 45;
 pub enum RightPanelMode {
     #[default]
     Files,
-    Diff,
-    Jira,
     Custom(String),
 }
 
 impl RightPanelMode {
-    pub(crate) const BUILTIN: [RightPanelMode; 3] = [
-        RightPanelMode::Files,
-        RightPanelMode::Diff,
-        RightPanelMode::Jira,
-    ];
+    pub(crate) const BUILTIN: [RightPanelMode; 1] = [RightPanelMode::Files];
 
     pub(crate) fn label(&self) -> &str {
         match self {
             Self::Files => "files",
-            Self::Diff => "diff",
-            Self::Jira => "jira",
             Self::Custom(label) => label,
         }
     }
@@ -74,7 +66,7 @@ impl schemars::JsonSchema for RightPanelMode {
             "anyOf": [
                 {
                     "type": "string",
-                    "enum": ["files", "diff", "jira"]
+                    "enum": ["files"]
                 },
                 {
                     "type": "string",
@@ -202,9 +194,7 @@ pub(crate) struct RightPanelState {
     pub width: PopupSize,
     pub manual_width: Option<u16>,
     pub files_command: String,
-    pub diff_command: String,
     pub open_command: String,
-    pub jira_command: String,
     pub custom_tabs: Vec<RightPanelTabConfig>,
     pub panes: std::collections::HashMap<PaneId, PanePanel>,
     pub instances: Vec<RightPanelInstance>,
@@ -217,9 +207,7 @@ impl Default for RightPanelState {
             width: default_width(),
             manual_width: None,
             files_command: config.files_command,
-            diff_command: config.diff_command,
             open_command: config.open_command,
-            jira_command: config.jira_command,
             custom_tabs: Vec::new(),
             panes: std::collections::HashMap::new(),
             instances: Vec::new(),
@@ -235,9 +223,7 @@ impl RightPanelState {
     ) -> Vec<RightPanelInstance> {
         self.width = width;
         self.files_command = config.files_command.clone();
-        self.diff_command = config.diff_command.clone();
         self.open_command = config.open_command.clone();
-        self.jira_command = config.jira_command.clone();
         self.custom_tabs = config.resolved_tabs().0;
         let known = self.modes();
         for pane in self.panes.values_mut() {
@@ -266,8 +252,6 @@ impl RightPanelState {
     pub(crate) fn command(&self, mode: &RightPanelMode) -> Option<&str> {
         match mode {
             RightPanelMode::Files => Some(&self.files_command),
-            RightPanelMode::Diff => Some(&self.diff_command),
-            RightPanelMode::Jira => Some(&self.jira_command),
             RightPanelMode::Custom(label) => self
                 .custom_tabs
                 .iter()
@@ -557,13 +541,13 @@ mod tests {
     fn content_and_header_tabs_follow_the_panel_rect() {
         let panel = Rect::new(60, 0, 40, 20);
         assert_eq!(content_rect(panel), Rect::new(61, 1, 39, 19));
-        let tabs = header_tabs(panel, &header_modes(&[]));
+        let tabs = header_tabs(panel, &header_modes(&["logs".into(), "jobs".into()]));
         assert_eq!(
             tabs,
             vec![
                 (RightPanelMode::Files, Rect::new(62, 0, 7, 1)),
-                (RightPanelMode::Diff, Rect::new(70, 0, 6, 1)),
-                (RightPanelMode::Jira, Rect::new(77, 0, 6, 1)),
+                (custom("logs"), Rect::new(70, 0, 6, 1)),
+                (custom("jobs"), Rect::new(77, 0, 6, 1)),
             ]
         );
     }
@@ -607,24 +591,17 @@ mod tests {
             labels(Rect::new(0, 0, 60, 20)),
             vec![
                 ("files".to_owned(), 2, 7),
-                ("diff".to_owned(), 10, 6),
-                ("jira".to_owned(), 17, 6),
-                ("rails c".to_owned(), 24, 9),
-                ("awsx".to_owned(), 34, 6),
+                ("rails c".to_owned(), 10, 9),
+                ("awsx".to_owned(), 20, 6),
             ]
         );
-        assert_eq!(labels(Rect::new(0, 0, 36, 20)).len(), 4);
-        assert_eq!(labels(Rect::new(0, 0, 24, 20)).len(), 3);
+        assert_eq!(labels(Rect::new(0, 0, 24, 20)).len(), 2);
+        assert_eq!(labels(Rect::new(0, 0, 18, 20)).len(), 1);
     }
 
     #[test]
     fn modes_round_trip_through_their_labels() {
-        for mode in [
-            RightPanelMode::Files,
-            RightPanelMode::Diff,
-            RightPanelMode::Jira,
-            custom("rails c"),
-        ] {
+        for mode in [RightPanelMode::Files, custom("rails c"), custom("diff")] {
             let json = serde_json::to_string(&mode).unwrap();
             assert_eq!(json, format!("\"{}\"", mode.label()));
             assert_eq!(serde_json::from_str::<RightPanelMode>(&json).unwrap(), mode);
@@ -646,12 +623,12 @@ mod tests {
         let previous =
             |mode: &RightPanelMode| state.cycled(mode, RightPanelCycleDirection::Previous);
 
-        assert_eq!(next(&RightPanelMode::Jira), custom("a"));
+        assert_eq!(next(&RightPanelMode::Files), custom("a"));
         assert_eq!(next(&custom("a")), custom("b"));
         assert_eq!(next(&custom("b")), RightPanelMode::Files);
         assert_eq!(previous(&RightPanelMode::Files), custom("b"));
-        assert_eq!(previous(&custom("a")), RightPanelMode::Jira);
-        assert_eq!(next(&custom("gone")), RightPanelMode::Diff);
+        assert_eq!(previous(&custom("a")), RightPanelMode::Files);
+        assert_eq!(next(&custom("gone")), custom("a"));
     }
 
     #[test]
@@ -857,9 +834,9 @@ mod tests {
     fn manual_width_is_shared_by_every_pane_within_the_clamps() {
         let area = Rect::new(0, 0, 120, 40);
         let (a, b) = (PaneId::alloc(), PaneId::alloc());
-        let mut state = RightPanelState::default();
+        let mut state = configured(&["logs"]);
         shown(&mut state, a, RightPanelMode::Files);
-        shown(&mut state, b, RightPanelMode::Diff);
+        shown(&mut state, b, custom("logs"));
         state.manual_width = Some(30);
         assert_eq!(state.panel_rect(Some(a), area).unwrap().width, 30);
         assert_eq!(state.panel_rect(Some(b), area).unwrap().width, 30);
@@ -880,20 +857,20 @@ mod tests {
         let mut state = RightPanelState {
             instances: vec![
                 instance(a, RightPanelMode::Files, "/a"),
-                instance(a, RightPanelMode::Diff, "/a"),
+                instance(a, custom("logs"), "/a"),
                 instance(b, RightPanelMode::Files, "/a"),
             ],
-            ..Default::default()
+            ..configured(&["logs"])
         };
         assert_eq!(state.displayed(a), None);
-        shown(&mut state, a, RightPanelMode::Diff);
+        shown(&mut state, a, custom("logs"));
 
         assert_eq!(state.displayed(a), Some(&state.instances[1]));
         state.pane_mut(a).mode = RightPanelMode::Files;
         assert_eq!(state.displayed(a), Some(&state.instances[0]));
         assert_eq!(state.displayed(b), None);
         assert_eq!(state.instance_for(b, &RightPanelMode::Files), Some(2));
-        assert_eq!(state.instance_for(b, &RightPanelMode::Diff), None);
+        assert_eq!(state.instance_for(b, &custom("logs")), None);
     }
 
     #[test]
@@ -923,9 +900,9 @@ mod tests {
         let mut state = RightPanelState {
             instances: vec![
                 instance(owner, RightPanelMode::Files, "/a"),
-                instance(owner, RightPanelMode::Diff, "/a"),
+                instance(owner, custom("logs"), "/a"),
             ],
-            ..Default::default()
+            ..configured(&["logs"])
         };
         let first = state.instances[0].terminal_id.clone();
 
@@ -966,11 +943,11 @@ mod tests {
         let mut state = RightPanelState {
             instances: vec![
                 instance(owner, RightPanelMode::Files, "/a"),
-                instance(owner, RightPanelMode::Diff, "/a"),
+                instance(owner, custom("logs"), "/a"),
             ],
-            ..Default::default()
+            ..configured(&["logs"])
         };
-        shown(&mut state, owner, RightPanelMode::Diff);
+        shown(&mut state, owner, custom("logs"));
         let diff = state.instances[1].pane_id;
 
         assert_eq!(
@@ -992,9 +969,9 @@ mod tests {
         let mut state = RightPanelState {
             instances: vec![
                 instance(owner, RightPanelMode::Files, "/a"),
-                instance(owner, RightPanelMode::Diff, "/a"),
+                instance(owner, custom("logs"), "/a"),
             ],
-            ..Default::default()
+            ..configured(&["logs"])
         };
         shown(&mut state, owner, RightPanelMode::Files);
         let diff = state.instances[1].pane_id;
@@ -1013,9 +990,9 @@ mod tests {
             instances: vec![
                 instance(a, RightPanelMode::Files, "/a"),
                 instance(b, RightPanelMode::Files, "/b"),
-                instance(a, RightPanelMode::Diff, "/a"),
+                instance(a, custom("logs"), "/a"),
             ],
-            ..Default::default()
+            ..configured(&["logs"])
         };
         shown(&mut state, a, RightPanelMode::Files);
 

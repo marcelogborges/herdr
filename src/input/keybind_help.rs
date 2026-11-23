@@ -191,7 +191,7 @@ pub(crate) fn keybind_help_groups(
                 entry(binding_label(&keybinds.toggle_sidebar), "toggle sidebar"),
                 entry(
                     binding_label(&keybinds.toggle_right_panel),
-                    "toggle files/diff panel",
+                    "toggle right panel",
                 ),
                 entry(
                     binding_label(&keybinds.right_panel_next_mode),
