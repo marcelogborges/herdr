@@ -911,7 +911,7 @@ fn render_activity_bar(
     owner: Option<crate::layout::PaneId>,
     bar: Rect,
 ) {
-    use ratatui::style::Style;
+    use ratatui::style::{Modifier, Style};
 
     let palette = &app.state.palette;
     let state = &app.state.right_panel;
@@ -924,25 +924,32 @@ fn render_activity_bar(
     let icons = crate::right_panel::activity_bar_icons(bar, state.views.len());
     for (index, (view, rect)) in state.views.iter().zip(icons).enumerate() {
         let right = rect.x + rect.width;
-        let base = Style::default().bg(palette.panel_bg);
+        let middle = rect.y + rect.height / 2;
+        // icons are one cell; Nerd Font glyphs spill into the next one, so the centre column
+        // leaves room on both sides
+        let icon_x = rect.x + rect.width / 2;
         if active == Some(index) {
-            put_text(buffer, rect.x, rect.y, right, "▎", base.fg(palette.accent));
+            let tile = Style::default().bg(palette.surface0);
+            clear_rect(buffer, rect, tile);
+            for y in rect.y..rect.y + rect.height {
+                put_text(buffer, rect.x, y, right, "▌", tile.fg(palette.accent));
+            }
             put_text(
                 buffer,
-                rect.x + 1,
-                rect.y,
+                icon_x,
+                middle,
                 right,
                 &view.icon,
-                base.fg(palette.accent),
+                tile.fg(palette.accent).add_modifier(Modifier::BOLD),
             );
         } else {
             put_text(
                 buffer,
-                rect.x + 1,
-                rect.y,
+                icon_x,
+                middle,
                 right,
                 &view.icon,
-                base.fg(palette.overlay0),
+                Style::default().bg(palette.panel_bg).fg(palette.subtext0),
             );
         }
     }
@@ -1283,20 +1290,21 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn activity_bar_marks_the_shown_view() {
         let (app, instance) = panel_app("awsx", true);
-        let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 83, 20));
+        let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 85, 20));
         render_activity_bar(
             &app,
             &mut buffer,
             Some(instance.owner),
-            Rect::new(80, 0, 3, 20),
+            Rect::new(80, 0, 5, 20),
         );
 
-        let icons = (1..7)
-            .step_by(2)
-            .map(|y| {
+        // tiles start on rows 1, 5, 9; icon on the middle row, centre column
+        let icons = [2u16, 6, 10]
+            .iter()
+            .map(|&y| {
                 (
                     buffer[(80, y)].symbol().to_owned(),
-                    buffer[(81, y)].symbol().to_owned(),
+                    buffer[(82, y)].symbol().to_owned(),
                 )
             })
             .collect::<Vec<_>>();
@@ -1305,11 +1313,13 @@ mod tests {
             vec![
                 (" ".to_owned(), "F".to_owned()),
                 (" ".to_owned(), "V".to_owned()),
-                ("▎".to_owned(), "R".to_owned()),
+                ("▌".to_owned(), "R".to_owned()),
             ]
         );
-        assert_eq!(buffer[(81, 5)].fg, app.state.palette.accent);
-        assert_eq!(buffer[(81, 1)].fg, app.state.palette.overlay0);
+        assert_eq!(buffer[(82, 10)].fg, app.state.palette.accent);
+        assert_eq!(buffer[(81, 10)].bg, app.state.palette.surface0);
+        assert_eq!(buffer[(80, 9)].symbol(), "▌");
+        assert_eq!(buffer[(82, 2)].fg, app.state.palette.subtext0);
     }
 
     #[tokio::test(flavor = "current_thread")]

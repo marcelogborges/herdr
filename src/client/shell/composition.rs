@@ -197,7 +197,7 @@ impl ClientShellState {
         };
         buffer.set_string(
             x,
-            rect.y,
+            rect.y + rect.height / 2,
             label,
             ratatui::style::Style::default()
                 .fg(self.config.palette.text)

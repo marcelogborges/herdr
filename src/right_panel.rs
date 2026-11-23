@@ -19,7 +19,10 @@ const MIN_TAB_COLS: u16 = 20;
 pub(crate) const PANEL_OWNER_PANE_ENV: &str = "HERDR_PANEL_OWNER_PANE_ID";
 pub(crate) const SESSION_REPOS_ENV: &str = "HERDR_SESSION_REPOS";
 const DEFAULT_WIDTH_PERCENT: u8 = 45;
-pub(crate) const ACTIVITY_BAR_COLS: u16 = 3;
+pub(crate) const ACTIVITY_BAR_COLS: u16 = 5;
+/// Rows of one activity bar tile (icon on the middle row) and the gap after it.
+pub(crate) const ACTIVITY_TILE_ROWS: u16 = 3;
+const ACTIVITY_TILE_GAP: u16 = 1;
 pub(crate) const PROD_TAG: &str = "prod";
 const HEADER_TAB_GAP: u16 = 2;
 const PROD_BADGE: &str = " PROD ";
@@ -153,12 +156,15 @@ pub(crate) fn activity_bar_rect(area: Rect) -> Option<Rect> {
     })
 }
 
-/// Rows of the activity bar's icons, one per view with a blank row between them.
+/// The activity bar's tiles, one per view: full bar width, three rows with the icon on the
+/// middle one, a blank row between tiles and one above the first. Tiles that don't fit are dropped.
 pub(crate) fn activity_bar_icons(bar: Rect, views: usize) -> Vec<Rect> {
+    let stride = ACTIVITY_TILE_ROWS + ACTIVITY_TILE_GAP;
     (0..views)
         .map_while(|index| {
-            let offset = u16::try_from(index).ok()?.checked_mul(2)?.checked_add(1)?;
-            (offset < bar.height).then(|| Rect::new(bar.x, bar.y + offset, bar.width, 1))
+            let offset = u16::try_from(index).ok()?.checked_mul(stride)?.checked_add(1)?;
+            (offset.checked_add(ACTIVITY_TILE_ROWS)? <= bar.height)
+                .then(|| Rect::new(bar.x, bar.y + offset, bar.width, ACTIVITY_TILE_ROWS))
         })
         .collect()
 }
@@ -1049,19 +1055,19 @@ mod tests {
         let width = PopupSize::Cells(40);
 
         let both = surface_split(area, width, true, true);
-        assert_eq!(both.bar, Some(Rect::new(97, 0, 3, 20)));
-        assert_eq!(both.panel, Some(Rect::new(57, 0, 40, 20)));
-        assert_eq!(both.tab, Rect::new(0, 0, 57, 20));
+        assert_eq!(both.bar, Some(Rect::new(95, 0, 5, 20)));
+        assert_eq!(both.panel, Some(Rect::new(55, 0, 40, 20)));
+        assert_eq!(both.tab, Rect::new(0, 0, 55, 20));
 
         let closed = surface_split(area, width, false, true);
         assert_eq!(closed.panel, None);
-        assert_eq!(closed.tab, Rect::new(0, 0, 97, 20));
+        assert_eq!(closed.tab, Rect::new(0, 0, 95, 20));
 
         let off = surface_split(area, width, true, false);
         assert_eq!(off.bar, None);
         assert_eq!(off.panel, Some(Rect::new(60, 0, 40, 20)));
 
-        let narrow = surface_split(Rect::new(0, 0, 22, 20), width, false, true);
+        let narrow = surface_split(Rect::new(0, 0, 24, 20), width, false, true);
         assert_eq!(narrow.bar, None);
     }
 
@@ -1079,19 +1085,19 @@ mod tests {
         assert!(state.bar_visible_for(Some(owner)));
         assert_eq!(
             state.bar_rect(Some(owner), Rect::new(0, 0, 120, 40)),
-            Some(Rect::new(117, 0, 3, 40))
+            Some(Rect::new(115, 0, 5, 40))
         );
     }
 
     #[test]
-    fn activity_bar_icons_leave_a_blank_row_between_views() {
-        let bar = Rect::new(97, 2, 3, 6);
+    fn activity_bar_icons_are_three_row_tiles_with_a_gap() {
+        let bar = Rect::new(95, 2, 5, 12);
         assert_eq!(
             activity_bar_icons(bar, 4),
             vec![
-                Rect::new(97, 3, 3, 1),
-                Rect::new(97, 5, 3, 1),
-                Rect::new(97, 7, 3, 1),
+                Rect::new(95, 3, 5, 3),
+                Rect::new(95, 7, 5, 3),
+                Rect::new(95, 11, 5, 3),
             ]
         );
     }

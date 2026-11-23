@@ -180,8 +180,8 @@ fn activity_bar_click_activates_that_view() {
     let (rect, view) = state.hits.right_panel_icons[2];
     assert_eq!(view, 2);
 
-    let input = click(&mut state, rect.x + 1, rect.y);
-    let blank = click(&mut state, rect.x + 1, rect.y + 1);
+    let input = click(&mut state, rect.x + 2, rect.y + 1);
+    let blank = click(&mut state, rect.x + 2, rect.y + rect.height);
 
     assert!(matches!(
         &endpoint_methods(&input)[..],
@@ -202,12 +202,12 @@ fn hovering_an_activity_bar_icon_shows_its_label() {
     let mut state = state_with_projection(crate::right_panel::RightPanelMode::Files, true, false);
     let (rect, _) = state.hits.right_panel_icons[1];
 
-    let input = mouse(&mut state, MouseEventKind::Moved, rect.x + 1, rect.y);
+    let input = mouse(&mut state, MouseEventKind::Moved, rect.x + 2, rect.y + 1);
 
     assert!(input.repaint);
     assert_eq!(state.right_panel_bar_hover, Some(1));
     let frame = state.compose(106, 20).expect("pane frame");
-    let row = frame_row_text(&frame, rect.y);
+    let row = frame_row_text(&frame, rect.y + 1);
     assert!(row.contains(" vigias "), "{row:?}");
 }
 
