@@ -1722,7 +1722,7 @@ fn claude_session_rows_mark_live_sessions_and_show_folder_and_age() {
     ];
     let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(10_000_000 + 5 * 60_000);
 
-    let rows = super::agent_sidebar::claude_session_rows(&snapshot, now);
+    let rows = super::agent_sidebar::claude_session_rows(&snapshot, &[], now);
 
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].status, Some(AgentStatus::Working));
@@ -1733,4 +1733,32 @@ fn claude_session_rows_mark_live_sessions_and_show_folder_and_age() {
     assert!(!rows[1].focused);
     assert_eq!(rows[1].detail, "VK25-2904 · 2h");
     assert_eq!(rows[1].hit.session_id, "closed");
+}
+
+#[test]
+fn claude_session_rows_skip_sessions_under_hidden_paths() {
+    let mut snapshot = snapshot();
+    let session = |id: &str, cwd: &str| crate::protocol::ClientShellClaudeSession {
+        session_id: id.into(),
+        title: id.into(),
+        cwd: cwd.into(),
+        context: String::new(),
+        updated_at_ms: 0,
+        pane_id: None,
+    };
+    snapshot.claude_sessions = vec![
+        session("manual", "/home/me/projects/vakinha-api"),
+        session("vigia", "/home/me/devkit/agents/vigias/dados/VK25-3620"),
+        session("legacy", "/home/me/projects/agents/watch/VK25-3610"),
+    ];
+    let hidden = vec![
+        "/vigias/dados/".to_owned(),
+        "/agents/watch/".to_owned(),
+        String::new(),
+    ];
+
+    let rows = super::agent_sidebar::claude_session_rows(&snapshot, &hidden, std::time::UNIX_EPOCH);
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].hit.session_id, "manual");
 }
