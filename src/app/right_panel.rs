@@ -313,7 +313,7 @@ impl App {
             .panes
             .keys()
             .copied()
-            .chain(self.state.right_panel.instances.iter().map(|i| i.owner))
+            .chain(self.state.right_panel.owning_panes())
             .filter(|owner| !self.state.pane_exists(*owner))
             .collect::<std::collections::HashSet<_>>();
         for owner in gone {

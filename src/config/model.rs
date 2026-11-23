@@ -1020,6 +1020,9 @@ pub struct RightPanelTabConfig {
     pub group: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// One instance for every pane: opening the tab anywhere shows the same terminal.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shared: bool,
 }
 
 fn trimmed_option(value: Option<&String>) -> Option<String> {
@@ -1060,6 +1063,7 @@ impl RightPanelConfig {
                     icon: trimmed_option(tab.icon.as_ref()),
                     group: trimmed_option(tab.group.as_ref()),
                     tag: trimmed_option(tab.tag.as_ref()),
+                    shared: tab.shared,
                 }),
             }
         }

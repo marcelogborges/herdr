@@ -78,6 +78,7 @@ fn ops_views() -> Vec<crate::right_panel::RightPanelView> {
             icon: None,
             group: group.map(str::to_owned),
             tag: tag.map(str::to_owned),
+            shared: false,
         };
     crate::right_panel::build_views(
         None,

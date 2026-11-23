@@ -1159,6 +1159,7 @@ mod tests {
                 icon: None,
                 group: group.map(str::to_owned),
                 tag: tag.map(str::to_owned),
+                shared: false,
             }
         };
         let config = crate::config::RightPanelConfig {

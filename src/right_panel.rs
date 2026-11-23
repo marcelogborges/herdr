@@ -533,6 +533,17 @@ impl RightPanelState {
             .cloned()
     }
 
+    /// Tabs marked `shared` keep one instance for every pane instead of one per pane.
+    pub(crate) fn is_shared(&self, mode: &RightPanelMode) -> bool {
+        match mode {
+            RightPanelMode::Files => false,
+            RightPanelMode::Custom(label) => self
+                .custom_tabs
+                .iter()
+                .any(|tab| &tab.label == label && tab.shared),
+        }
+    }
+
     pub(crate) fn command(&self, mode: &RightPanelMode) -> Option<&str> {
         match mode {
             RightPanelMode::Files => Some(&self.files_command),
@@ -629,7 +640,9 @@ impl RightPanelState {
     pub(crate) fn instance_for(&self, owner: PaneId, mode: &RightPanelMode) -> Option<usize> {
         self.instances
             .iter()
-            .position(|instance| instance.owner == owner && &instance.mode == mode)
+            .position(|instance| {
+                &instance.mode == mode && (instance.owner == owner || self.is_shared(mode))
+            })
     }
 
     pub(crate) fn displayed(&self, owner: PaneId) -> Option<&RightPanelInstance> {
@@ -671,11 +684,17 @@ impl RightPanelState {
     }
 
     pub(crate) fn take_exited_for(&mut self, owner: PaneId) -> Vec<RightPanelInstance> {
-        let (exited, live) = std::mem::take(&mut self.instances)
+        let shared: Vec<bool> = self
+            .instances
+            .iter()
+            .map(|instance| self.is_shared(&instance.mode))
+            .collect();
+        let (exited, live): (Vec<_>, Vec<_>) = std::mem::take(&mut self.instances)
             .into_iter()
-            .partition(|instance| instance.owner == owner && instance.exited);
-        self.instances = live;
-        exited
+            .zip(shared)
+            .partition(|(instance, shared)| instance.exited && (instance.owner == owner || *shared));
+        self.instances = live.into_iter().map(|(instance, _)| instance).collect();
+        exited.into_iter().map(|(instance, _)| instance).collect()
     }
 
     pub(crate) fn take_instance(
@@ -689,11 +708,25 @@ impl RightPanelState {
 
     pub(crate) fn remove_owner(&mut self, owner: PaneId) -> Vec<RightPanelInstance> {
         self.panes.remove(&owner);
-        let (removed, kept) = std::mem::take(&mut self.instances)
+        let shared: Vec<bool> = self
+            .instances
+            .iter()
+            .map(|instance| self.is_shared(&instance.mode))
+            .collect();
+        let (removed, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.instances)
             .into_iter()
-            .partition(|instance| instance.owner == owner);
-        self.instances = kept;
-        removed
+            .zip(shared)
+            .partition(|(instance, shared)| instance.owner == owner && !shared);
+        self.instances = kept.into_iter().map(|(instance, _)| instance).collect();
+        removed.into_iter().map(|(instance, _)| instance).collect()
+    }
+
+    /// Owners of instances that die with their pane (shared tabs outlive the pane that opened them).
+    pub(crate) fn owning_panes(&self) -> impl Iterator<Item = PaneId> + '_ {
+        self.instances
+            .iter()
+            .filter(|instance| !self.is_shared(&instance.mode))
+            .map(|instance| instance.owner)
     }
 
     pub(crate) fn command_exited(
@@ -706,17 +739,23 @@ impl RightPanelState {
             .iter()
             .position(|instance| instance.pane_id == pane_id)?;
         let instance = &self.instances[index];
-        let owner = instance.owner;
-        let displayed = self
-            .pane(owner)
-            .is_some_and(|pane| pane.visible && pane.mode == instance.mode);
+        let shared = self.is_shared(&instance.mode);
+        let showing: Vec<PaneId> = self
+            .panes
+            .iter()
+            .filter(|(owner, pane)| {
+                pane.visible && pane.mode == instance.mode && (shared || **owner == instance.owner)
+            })
+            .map(|(owner, _)| *owner)
+            .collect();
+        let displayed = !showing.is_empty();
         let failed_start = now.saturating_duration_since(instance.spawned_at) < FAILED_START_WINDOW;
         if displayed && failed_start {
             self.instances[index].exited = true;
             return Some(PanelExit::KeptFailedStart);
         }
         let instance = self.instances.remove(index);
-        if displayed {
+        for owner in showing {
             let pane = self.pane_mut(owner);
             pane.visible = false;
             pane.focused = false;
@@ -1402,6 +1441,36 @@ mod tests {
         assert_eq!(state.displayed(b), None);
         assert_eq!(state.instance_for(b, &RightPanelMode::Files), Some(2));
         assert_eq!(state.instance_for(b, &custom("logs")), None);
+    }
+
+    #[test]
+    fn shared_tab_is_one_instance_for_every_pane_and_outlives_its_opener() {
+        let (a, b) = (PaneId::alloc(), PaneId::alloc());
+        let mut base = RightPanelState::default();
+        let config = RightPanelConfig {
+            tabs: vec![
+                tab("logs"),
+                RightPanelTabConfig {
+                    shared: true,
+                    ..tab("awsx")
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(base.apply_config(default_width(), &config).is_empty());
+        let mut state = RightPanelState {
+            instances: vec![instance(a, custom("awsx"), "/a"), instance(a, custom("logs"), "/a")],
+            ..base
+        };
+        assert!(state.is_shared(&custom("awsx")) && !state.is_shared(&custom("logs")));
+        assert_eq!(state.instance_for(b, &custom("awsx")), Some(0));
+        assert_eq!(state.instance_for(b, &custom("logs")), None);
+        assert_eq!(state.owning_panes().collect::<Vec<_>>(), vec![a]);
+
+        let removed = state.remove_owner(a);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].mode, custom("logs"));
+        assert_eq!(state.instance_for(b, &custom("awsx")), Some(0));
     }
 
     #[test]
