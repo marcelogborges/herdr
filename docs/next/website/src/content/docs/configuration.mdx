@@ -137,8 +137,9 @@ restarts. Quitting the panel command closes that terminal and hides that
 pane's panel, and closing a pane closes its panel terminals.
 
 Add your own tabs with `[[right_panel.tabs]]`, for example a Git client such as
-`lazygit`. They appear after `files` in the header, take part in `alt+q`/`alt+e` cycling and
-header clicks, and keep one terminal per pane like the built-in tabs:
+`lazygit`. Each tab is a view after `files`, takes part in `alt+q`/`alt+e` view cycling, and
+keeps one terminal per pane like the built-in tab. A tab's command starts the first time the
+tab is shown and keeps running while you switch to other views:
 
 ```toml
 [[right_panel.tabs]]
@@ -158,6 +159,44 @@ falls back to `files`. `right_panel.show` accepts a custom tab's label as its
 `mode`. Every panel command receives `HERDR_PANEL_OWNER_PANE_ID` and
 `HERDR_SESSION_REPOS`, the newline-separated repositories the owner pane's
 Claude Code session has touched, most recent first (empty when there is none).
+
+Tabs that share a `group` form one view: its header shows the group name and a
+row of tabs, each with a state dot (running, not started, or exited). Tabs that
+do not fit end in a `›N` marker that switches to the next hidden tab. A view
+reopens on the group tab you used last. `tag = "prod"` adds a `PROD` badge to
+the tab and turns the panel's focus border red while it shows:
+
+```toml
+[right_panel]
+activity_bar = "always"   # "always", "when_open", or "off" (default)
+files_icon = ""
+
+[[right_panel.tabs]]
+label = "rails c"
+command = "~/bin/rails-console"
+icon = ""
+group = "ops"
+tag = "prod"
+
+[[right_panel.tabs]]
+label = "metabase"
+command = "~/bin/sql"
+group = "ops"
+
+[keys]
+right_panel_view = ["alt+1", "alt+2"]
+right_panel_next_tab = "alt+]"
+right_panel_previous_tab = "alt+["
+```
+
+The activity bar is a three-column strip on the right edge with one icon per
+view (`files`, each ungrouped tab, and each group, in order). A view's icon is
+its `icon`, a group's is its first tab's, and the label's first letter
+otherwise. Clicking an icon opens that view; clicking the shown view's icon
+closes the panel, and hovering an icon shows its label. `right_panel_view`
+does the same from the keyboard, and the `✕` in the panel header closes it.
+When a tab's command exits right after starting, the panel keeps a card in its
+place: `enter` starts it again and `esc` closes the panel.
 
 Remote attach manages its SSH connection with temporary keepalives and, where supported, connection reuse by default.
 

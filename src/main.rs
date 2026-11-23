@@ -197,6 +197,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # toggle_right_panel = "prefix+i"
 # right_panel_next_mode = "alt+q"
 # right_panel_previous_mode = "alt+e"
+# right_panel_view = ""   # optional, e.g. ["alt+1", "alt+2"] opens view N or closes it when already shown
+# right_panel_next_tab = ""     # optional, e.g. "alt+]" cycles tabs inside a group view
+# right_panel_previous_tab = "" # optional, e.g. "alt+["
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
@@ -243,6 +246,15 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [right_panel]
 # files_command = "yazi"
 # open_command = "micro +{line} {path}; exec yazi {path}"
+# activity_bar = "off"    # "always", "when_open", or "off": one icon per view on the right edge
+# files_icon = ""         # icon for the files view; default is its first letter
+#
+# [[right_panel.tabs]]
+# label = "rails c"
+# command = "bin/rails console"
+# icon = ""               # optional; default is the label's first letter
+# group = "ops"           # optional; tabs sharing a group form one view with a tab row
+# tag = "prod"            # optional; "prod" adds a PROD badge and a red focus border
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
