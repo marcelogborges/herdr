@@ -997,6 +997,10 @@ pub struct RightPanelConfig {
     /// Icon for the built-in files view. Default: the label's first letter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files_icon: Option<String>,
+    /// 1-based position of the built-in files view in the activity bar. Default: 1 (first).
+    /// The first view is also the one a pane opens on the first time its panel is shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_position: Option<usize>,
     pub tabs: Vec<RightPanelTabConfig>,
 }
 
@@ -1084,6 +1088,7 @@ impl Default for RightPanelConfig {
             open_command: DEFAULT_RIGHT_PANEL_OPEN_COMMAND.to_owned(),
             activity_bar: RightPanelActivityBarConfig::default(),
             files_icon: None,
+            files_position: None,
             tabs: Vec::new(),
         }
     }

@@ -248,6 +248,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_command = "micro +{line} {path}; exec yazi {path}"
 # activity_bar = "off"    # "always", "when_open", or "off": one icon per view on the right edge
 # files_icon = ""         # icon for the files view; default is its first letter
+# files_position = 2       # where the files view sits in the bar (1 = first, the default); the first view is what a pane opens on
 #
 # [[right_panel.tabs]]
 # label = "rails c"

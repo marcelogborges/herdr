@@ -215,6 +215,22 @@ fn default_icon(label: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Moves the built-in files view (always built first) to the 1-based `position`, clamped to the bar.
+pub(crate) fn place_files(views: &mut Vec<RightPanelView>, position: Option<usize>) {
+    let Some(position) = position else { return };
+    let Some(index) = views
+        .iter()
+        .position(|view| view.tabs.iter().any(|tab| tab.mode == RightPanelMode::Files))
+    else {
+        return;
+    };
+    let target = position.max(1).min(views.len()) - 1;
+    if target != index {
+        let files = views.remove(index);
+        views.insert(target, files);
+    }
+}
+
 pub(crate) fn build_views(
     files_icon: Option<&str>,
     tabs: &[RightPanelTabConfig],
@@ -467,10 +483,12 @@ impl RightPanelState {
         self.activity_bar = config.activity_bar;
         self.custom_tabs = config.resolved_tabs().0;
         self.views = build_views(config.files_icon.as_deref(), &self.custom_tabs);
+        place_files(&mut self.views, config.files_position);
         let known = self.modes();
+        let first = self.first_mode();
         for pane in self.panes.values_mut() {
             if !known.contains(&pane.mode) {
-                pane.mode = RightPanelMode::Files;
+                pane.mode = first.clone();
             }
         }
         let (kept, removed) = std::mem::take(&mut self.instances)
@@ -612,7 +630,19 @@ impl RightPanelState {
     }
 
     pub(crate) fn pane_mut(&mut self, owner: PaneId) -> &mut PanePanel {
-        self.panes.entry(owner).or_default()
+        let first = self.first_mode();
+        self.panes.entry(owner).or_insert_with(|| PanePanel {
+            mode: first,
+            ..PanePanel::default()
+        })
+    }
+
+    /// Mode of the first view in the bar: what a pane shows the first time its panel opens.
+    pub(crate) fn first_mode(&self) -> RightPanelMode {
+        self.views
+            .first()
+            .and_then(|view| view.tabs.first())
+            .map_or(RightPanelMode::Files, |tab| tab.mode.clone())
     }
 
     pub(crate) fn is_visible_for(&self, owner: Option<PaneId>) -> bool {
@@ -1045,6 +1075,26 @@ mod tests {
         assert_eq!(state.header_rows(&custom("vigias")), 1);
         assert!(state.is_prod(&custom("rails c")));
         assert!(!state.is_prod(&custom("awsx")));
+    }
+
+    #[test]
+    fn files_position_moves_files_and_first_view_is_the_default() {
+        let tab = |label: &str| RightPanelTabConfig {
+            label: label.into(),
+            ..Default::default()
+        };
+        let mut views = build_views(None, &[tab("tasks"), tab("agendados")]);
+        place_files(&mut views, Some(2));
+        let labels: Vec<_> = views.iter().map(|view| view.label.as_str()).collect();
+        assert_eq!(labels, ["tasks", "files", "agendados"]);
+        place_files(&mut views, Some(99));
+        assert_eq!(views.last().unwrap().label, "files");
+        let mut state = RightPanelState::default();
+        state.views = views;
+        assert_eq!(state.pane_mut(PaneId::from_raw(7)).mode, RightPanelMode::Custom("tasks".into()));
+        let mut plain = build_views(None, &[tab("tasks")]);
+        place_files(&mut plain, None);
+        assert_eq!(plain[0].label, "files");
     }
 
     #[test]
