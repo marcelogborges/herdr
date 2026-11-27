@@ -307,6 +307,17 @@ pub(super) fn snapshot_with_completions(
     (shell, completions)
 }
 
+/// A tab pane's clickable rect, cut where the right panel covers it (a maximized panel is drawn over the
+/// tab instead of resizing it): clicks in the covered part go to the panel, which the client finds after.
+fn covered_by(rect: Rect, panel: Option<Rect>) -> Rect {
+    match panel {
+        Some(panel) if rect.x + rect.width > panel.x => {
+            Rect::new(rect.x, rect.y, panel.x.saturating_sub(rect.x), rect.height)
+        }
+        _ => rect,
+    }
+}
+
 fn right_panel_projection(
     app: &app::App,
     owner: Option<crate::layout::PaneId>,
@@ -321,6 +332,7 @@ fn right_panel_projection(
         exited: owner
             .and_then(|owner| state.displayed(owner))
             .is_some_and(|instance| instance.exited),
+        maximized: state.is_maximized(),
     }
 }
 
@@ -460,7 +472,7 @@ pub(super) fn render_pane_surface(
                         protocol::PaneSurfacePane {
                             pane_id,
                             content_revision,
-                            rect: pane.rect.into(),
+                            rect: covered_by(pane.rect, right_panel.map(|(_, panel)| panel)).into(),
                             inner_rect: pane.inner_rect.into(),
                             scrollbar_rect: pane.scrollbar_rect.map(Into::into),
                             scroll: runtime.and_then(|runtime| runtime.scroll_metrics()).map(
@@ -484,6 +496,14 @@ pub(super) fn render_pane_surface(
         })
         .unwrap_or_default();
     panes.extend(right_panel_pane);
+    if let Some((_, panel)) = right_panel {
+        // maximized panel over the tab: the tab's cursor under it would blink inside the panel
+        if !right_panel_focused
+            && cursor.as_ref().is_some_and(|c| c.x >= panel.x && c.x < panel.x + panel.width)
+        {
+            cursor = None;
+        }
+    }
     let pane_frames = layout
         .pane_infos
         .iter()
@@ -735,9 +755,15 @@ fn render_right_panel_header(
     );
     let layout = crate::right_panel::header_layout(panel, view, &pane_state.mode);
     let right = layout
-        .close
-        .map_or(panel.x + panel.width, |close| close.x.saturating_sub(1));
+        .maximize
+        .or(layout.restart)
+        .or(layout.close)
+        .map_or(panel.x + panel.width, |button| button.x.saturating_sub(1));
     let mut x = panel.x + 2;
+    if let Some(back) = layout.back {
+        buffer.set_string(back.x, back.y, " ‹ ", header.fg(palette.accent).add_modifier(Modifier::BOLD));
+        x = back.x + back.width + 1;
+    }
     if !view.icon.is_empty() {
         x = put_text(
             buffer,
@@ -784,6 +810,14 @@ fn render_right_panel_header(
             }
             put_text(buffer, x, panel.y, right, last, header.fg(palette.subtext0));
         }
+    }
+    if let Some(maximize) = layout.maximize {
+        // ⇤ grows the panel to the left (maximize); ⇥ gives the width back (configured size)
+        let glyph = if state.is_maximized() { " ⇥ " } else { " ⇤ " };
+        buffer.set_string(maximize.x, maximize.y, glyph, header.fg(palette.overlay1));
+    }
+    if let Some(restart) = layout.restart {
+        buffer.set_string(restart.x, restart.y, " ↻ ", header.fg(palette.overlay1));
     }
     if let Some(close) = layout.close {
         buffer.set_string(close.x, close.y, " ✕ ", header.fg(palette.overlay1));
@@ -1256,10 +1290,9 @@ mod tests {
         let (app, instance) = panel_app("files", false);
         let (buffer, pane) = render_panel(&app, instance.owner);
         let title = row(&buffer, 0);
-        assert!(
-            title.contains("F FILES  projects › vakinha-api"),
-            "{title:?}"
-        );
+        // 40 colunas: os botões ⇤ ↻ ✕ ocupam o fim da linha e o caminho é cortado antes deles
+        assert!(title.contains("F FILES  projects › vakin"), "{title:?}");
+        assert!(title.contains(" ⇤  ↻  ✕ "), "{title:?}");
         assert_eq!(pane.inner_rect, Rect::new(41, 1, 39, 19).into());
     }
 

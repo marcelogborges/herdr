@@ -2479,10 +2479,24 @@ impl ClientShellState {
         };
         let layout = crate::right_panel::header_layout(panel, view, &projection.mode);
         let method = if layout
+            .maximize
+            .is_some_and(|button| super::contains(button, point))
+        {
+            let width = (!projection.maximized).then_some(crate::right_panel::MAXIMIZED_WIDTH);
+            crate::api::schema::Method::RightPanelSetWidth(crate::api::schema::RightPanelSetWidthParams {
+                width,
+            })
+        } else if layout
             .close
             .is_some_and(|close| super::contains(close, point))
         {
             crate::api::schema::Method::RightPanelHide(crate::api::schema::EmptyParams {})
+        } else if [layout.restart, layout.back]
+            .into_iter()
+            .flatten()
+            .any(|button| super::contains(button, point))
+        {
+            crate::api::schema::Method::RightPanelRestart(crate::api::schema::EmptyParams {})
         } else if let Some(mode) = layout
             .tabs
             .into_iter()

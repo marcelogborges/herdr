@@ -16,6 +16,8 @@ pub(crate) const MAX_INSTANCES: usize = 16;
 pub(crate) const FAILED_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 const MIN_PANEL_COLS: u16 = 20;
 const MIN_TAB_COLS: u16 = 20;
+/// Manual width that means "as wide as the surface allows": split_area clamps it to leave MIN_TAB_COLS.
+pub(crate) const MAXIMIZED_WIDTH: u16 = u16::MAX;
 pub(crate) const PANEL_OWNER_PANE_ENV: &str = "HERDR_PANEL_OWNER_PANE_ID";
 pub(crate) const SESSION_REPOS_ENV: &str = "HERDR_SESSION_REPOS";
 const DEFAULT_WIDTH_PERCENT: u8 = 45;
@@ -306,6 +308,12 @@ pub(crate) fn prod_badge() -> &'static str {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct HeaderLayout {
     pub close: Option<Rect>,
+    /// Restart button, left of close: kills the shown tab's command and starts it again.
+    pub restart: Option<Rect>,
+    /// Maximize button, left of restart: widens the panel to the maximum, or back to the configured width.
+    pub maximize: Option<Rect>,
+    /// Files only, before the title: back to the explorer from an opened file (restarts the files tab).
+    pub back: Option<Rect>,
     pub tabs: Vec<(RightPanelMode, Rect)>,
     /// Marker for tabs that do not fit: its rect, the tab it switches to, and how many are hidden.
     pub overflow: Option<(Rect, RightPanelMode, usize)>,
@@ -318,9 +326,16 @@ pub(crate) fn header_layout(
 ) -> HeaderLayout {
     let right = panel.x.saturating_add(panel.width);
     let close = (panel.width >= 8).then(|| Rect::new(right - 3, panel.y, 3, 1));
+    let restart = (panel.width >= 14).then(|| Rect::new(right - 6, panel.y, 3, 1));
+    let maximize = (panel.width >= 17).then(|| Rect::new(right - 9, panel.y, 3, 1));
+    let back = (*active == RightPanelMode::Files && panel.width >= 14)
+        .then(|| Rect::new(panel.x + 1, panel.y, 3, 1));
     if !view.group || panel.height < 2 {
         return HeaderLayout {
             close,
+            restart,
+            maximize,
+            back,
             ..HeaderLayout::default()
         };
     }
@@ -370,6 +385,9 @@ pub(crate) fn header_layout(
     }
     HeaderLayout {
         close,
+        restart,
+        maximize,
+        back,
         tabs,
         overflow,
     }
@@ -621,6 +639,11 @@ impl RightPanelState {
         )
     }
 
+    /// The header's maximize button set the width to the surface maximum.
+    pub(crate) fn is_maximized(&self) -> bool {
+        self.manual_width == Some(MAXIMIZED_WIDTH)
+    }
+
     pub(crate) fn effective_width(&self) -> PopupSize {
         self.manual_width.map_or(self.width, PopupSize::Cells)
     }
@@ -655,8 +678,22 @@ impl RightPanelState {
         self.panes.values().any(|pane| pane.visible)
     }
 
+    /// Where the tab's panes live. A maximized panel is drawn over them instead of squeezing them: their
+    /// terminals keep the size they had at the configured width, so nothing reflows into a narrow column
+    /// and the chat is intact when the panel goes back.
     pub(crate) fn tab_area(&self, owner: Option<PaneId>, area: Rect) -> Rect {
-        self.split(owner, area).tab
+        let width = if self.is_maximized() {
+            self.width
+        } else {
+            self.effective_width()
+        };
+        surface_split(
+            area,
+            width,
+            self.is_visible_for(owner),
+            self.bar_visible_for(owner),
+        )
+        .tab
     }
 
     pub(crate) fn panel_rect(&self, owner: Option<PaneId>, area: Rect) -> Option<Rect> {
@@ -1467,6 +1504,11 @@ mod tests {
         );
         state.manual_width = Some(500);
         assert_eq!(state.tab_area(Some(a), area).width, MIN_TAB_COLS);
+        state.manual_width = Some(MAXIMIZED_WIDTH);
+        assert!(state.is_maximized());
+        // maximized: the panel covers the tab, but the tab keeps its configured-width size (no reflow)
+        assert_eq!(state.panel_rect(Some(a), area).unwrap().width, 120 - MIN_TAB_COLS);
+        assert_eq!(state.tab_area(Some(a), area).width, 120 - 54);
         state.manual_width = None;
         assert_eq!(state.panel_rect(Some(a), area).unwrap().width, 54);
     }

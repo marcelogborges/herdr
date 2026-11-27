@@ -114,12 +114,17 @@ impl App {
         self.request_right_panel_render();
     }
 
-    /// Starts the shown tab again after its command exited.
+    /// Starts the shown tab again: drops its instance (running or exited) so the next sync spawns a fresh one.
+    /// On files this is also the ‹ back button: the opened file closes and the explorer starts again.
     pub(crate) fn restart_right_panel(&mut self) {
         let Some((_, owner)) = self.state.focused_right_panel_owner() else {
             return;
         };
         self.release_exited_right_panel_instances(owner);
+        let mode = self.state.right_panel.pane_mut(owner).mode.clone();
+        if let Some(instance) = self.state.right_panel.take_instance(owner, &mode) {
+            self.release_right_panel_instance(instance);
+        }
         let pane = self.state.right_panel.pane_mut(owner);
         pane.visible = true;
         pane.focused = true;
@@ -821,6 +826,25 @@ mod tests {
         let pane = app.state.right_panel.pane(owner).unwrap();
         assert!(!pane.visible && !pane.focused);
         assert!(app.state.right_panel.instances.is_empty());
+    }
+
+    #[test]
+    fn restart_drops_a_running_tab_and_keeps_the_others() {
+        let mut app = test_app();
+        let owner = focused(&app);
+        configure_tabs(&mut app, &["logs", "jobs"]);
+        let jobs = install_instance(&mut app, owner, custom("jobs"), "/a");
+        let logs = install_instance(&mut app, owner, custom("logs"), "/a");
+        app.show_right_panel(custom("logs"));
+
+        app.restart_right_panel();
+
+        let pane = app.state.right_panel.pane(owner).unwrap();
+        assert!(pane.visible && pane.focused);
+        assert_eq!(pane.mode, custom("logs"));
+        assert!(!app.state.terminals.contains_key(&logs.terminal_id));
+        assert!(app.state.terminals.contains_key(&jobs.terminal_id));
+        assert_eq!(app.state.right_panel.instances.len(), 1);
     }
 
     #[test]

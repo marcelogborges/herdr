@@ -108,6 +108,7 @@ fn state_with_projection(
         visible: true,
         mode,
         exited,
+        maximized: false,
     });
     state.set_snapshot(Box::new(snapshot));
     let mut surface = surface();
@@ -171,6 +172,66 @@ fn header_close_button_hides_the_panel() {
         &endpoint_methods(&input)[..],
         [crate::api::schema::Method::RightPanelHide(_)]
     ));
+}
+
+#[test]
+fn header_restart_button_restarts_the_shown_tab() {
+    for mode in [custom("vigias"), custom("rails c")] {
+        let mut state = state_with_projection(mode, false, false);
+        let layout = header(&state);
+        let restart = layout.restart.expect("restart button");
+        assert_eq!(restart.x + 3, layout.close.expect("close button").x);
+
+        let input = click(&mut state, restart.x + 1, restart.y);
+
+        assert!(matches!(
+            &endpoint_methods(&input)[..],
+            [crate::api::schema::Method::RightPanelRestart(_)]
+        ));
+    }
+}
+
+#[test]
+fn header_maximize_button_toggles_between_maximum_and_configured_width() {
+    let mut state = state_with_projection(custom("vigias"), false, false);
+    let layout = header(&state);
+    let maximize = layout.maximize.expect("maximize button");
+    assert_eq!(maximize.x + 3, layout.restart.expect("restart button").x);
+
+    let input = click(&mut state, maximize.x + 1, maximize.y);
+    assert!(matches!(
+        &endpoint_methods(&input)[..],
+        [crate::api::schema::Method::RightPanelSetWidth(params)]
+            if params.width == Some(crate::right_panel::MAXIMIZED_WIDTH)
+    ));
+
+    let mut snapshot = snapshot();
+    snapshot.right_panel = Some(crate::protocol::ClientShellRightPanel {
+        maximized: true,
+        ..state.right_panel_projection()
+    });
+    state.set_snapshot(Box::new(snapshot));
+    state.compose(106, 20).expect("pane frame");
+    let input = click(&mut state, maximize.x + 1, maximize.y);
+    assert!(matches!(
+        &endpoint_methods(&input)[..],
+        [crate::api::schema::Method::RightPanelSetWidth(params)] if params.width.is_none()
+    ));
+}
+
+#[test]
+fn files_header_back_button_restarts_files_as_the_explorer() {
+    let mut state = state_with_projection(crate::right_panel::RightPanelMode::Files, false, false);
+    let back = header(&state).back.expect("back button");
+
+    let input = click(&mut state, back.x + 1, back.y);
+
+    assert!(matches!(
+        &endpoint_methods(&input)[..],
+        [crate::api::schema::Method::RightPanelRestart(_)]
+    ));
+    let other = state_with_projection(custom("vigias"), false, false);
+    assert_eq!(header(&other).back, None);
 }
 
 #[test]

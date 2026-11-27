@@ -967,6 +967,9 @@ pub struct ClientShellRightPanel {
     pub mode: crate::right_panel::RightPanelMode,
     /// Whether the shown tab's command exited and waits to be reopened or closed.
     pub exited: bool,
+    /// Whether the panel is maximized (the header button then restores the configured width).
+    #[serde(default)]
+    pub maximized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
